@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """UFO Desktop App - Floating UFO with nanobot gateway control"""
 
+import collections
 import datetime
 import math
 import os
 import random
 import signal
 import subprocess
+import threading
 import time
 
 import objc
@@ -14,9 +16,13 @@ from AppKit import (
     NSApp,
     NSApplication,
     NSApplicationActivationPolicyAccessory,
+    NSAttributedString,
     NSBackingStoreBuffered,
     NSColor,
     NSEvent,
+    NSFont,
+    NSFontAttributeName,
+    NSForegroundColorAttributeName,
     NSImage,
     NSImageScaleProportionallyUpOrDown,
     NSImageView,
@@ -26,7 +32,9 @@ from AppKit import (
     NSRunLoop,
     NSRunLoopCommonModes,
     NSScreen,
+    NSScrollView,
     NSStatusBar,
+    NSTextView,
     NSTimer,
     NSView,
     NSWindow,
@@ -36,28 +44,51 @@ from AppKit import (
 )
 from Quartz import CGPointMake, CGRectMake
 
+# --- Nanobot ---
+NANOBOT_DIR = os.path.expanduser("~/Desktop/nanobot")
+
+# --- Display ---
+UFO_SIZE = 120
+
+# --- Roaming ---
+ROAM_SPEED = 1.8
+ARRIVE_THRESHOLD = 60.0
+MARGIN = 60
+
+# --- Floating wobble ---
+WOBBLE_Y_AMP = 8.0
+WOBBLE_X_AMP = 3.0
+WOBBLE_PERIOD = 2.8
+
+TIMER_INTERVAL = 1.0 / 60.0
+
+# --- Log panel ---
+PANEL_W = 460
+PANEL_H = 220
+PANEL_PADDING = 10
+LOG_MAX_LINES = 150
+
 
 class ClickableView(NSView):
-    """透明なクリック受け取りビュー。
-    シングルクリック → スクショ起動
-    ダブルクリック  → 浮遊トグル（停止 ↔ 再開）
+    """UFOクリック受け取りビュー。
+    シングルクリック → 浮遊トグル
+    ダブルクリック  → スクショ
+    停止中ドラッグ  → 移動
     """
 
-    _last_screenshot = 0.0  # スクショの連続発火防止
-    _pending_timer = None   # シングルクリック判定用遅延タイマー
+    _last_screenshot = 0.0
+    _pending_timer = None
 
     def acceptsFirstMouse_(self, event):
         return True
 
     def mouseDown_(self, event):
         self._dragged = False
-        # ドラッグ用にクリック位置（ウィンドウ内座標）を保存
         loc = event.locationInWindow()
         self._drag_offset_x = loc.x
         self._drag_offset_y = loc.y
 
         if event.clickCount() == 2:
-            # ダブルクリック: 保留中のトグルをキャンセルしてスクショ
             if ClickableView._pending_timer is not None:
                 ClickableView._pending_timer.invalidate()
                 ClickableView._pending_timer = None
@@ -72,7 +103,6 @@ class ClickableView(NSView):
             subprocess.Popen(["screencapture", "-i", "-s", save_path])
             return
 
-        # シングルクリック: 300ms待ってダブルクリック/ドラッグでなければ浮遊トグル
         t = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
             0.3, self, "fireToggle:", None, False
         )
@@ -81,17 +111,13 @@ class ClickableView(NSView):
 
     def mouseDragged_(self, event):
         delegate = NSApp.delegate()
-        if delegate._ufo_visible:  # アニメーション中はドラッグしない
+        if delegate._ufo_visible:
             return
-
-        # ドラッグ開始: スクショタイマーをキャンセル
         if not self._dragged:
             self._dragged = True
             if ClickableView._pending_timer is not None:
                 ClickableView._pending_timer.invalidate()
                 ClickableView._pending_timer = None
-
-        # スクリーン座標でマウス位置を取得して窓を移動
         screen_loc = NSEvent.mouseLocation()
         new_x = screen_loc.x - self._drag_offset_x
         new_y = screen_loc.y - self._drag_offset_y
@@ -99,7 +125,6 @@ class ClickableView(NSView):
 
     def mouseUp_(self, event):
         if self._dragged:
-            # ドロップ位置をデリゲートに反映（再開時にここから動き出す）
             origin = self.window().frame().origin
             delegate = NSApp.delegate()
             delegate._pos_x = origin.x
@@ -111,23 +136,21 @@ class ClickableView(NSView):
         ClickableView._pending_timer = None
         NSApp.delegate().toggleAnimation()
 
-# --- Nanobot ---
-NANOBOT_DIR = os.path.expanduser("~/Desktop/nanobot")
 
-# --- Display ---
-UFO_SIZE = 120
+class LogPanelView(NSView):
+    """ログパネルのドラッグ用ビュー。"""
 
-# --- Roaming ---
-ROAM_SPEED = 1.8          # px per frame (≈108 px/s at 60fps)
-ARRIVE_THRESHOLD = 60.0   # px — how close before picking next waypoint
-MARGIN = 60               # keep UFO this far from screen edges
+    def acceptsFirstMouse_(self, event):
+        return True
 
-# --- Floating wobble on top of roaming ---
-WOBBLE_Y_AMP = 8.0        # px vertical wobble amplitude
-WOBBLE_X_AMP = 3.0        # px horizontal wobble amplitude
-WOBBLE_PERIOD = 2.8       # seconds
+    def mouseDown_(self, event):
+        loc = event.locationInWindow()
+        self._ox = loc.x
+        self._oy = loc.y
 
-TIMER_INTERVAL = 1.0 / 60.0
+    def mouseDragged_(self, event):
+        sl = NSEvent.mouseLocation()
+        self.window().setFrameOrigin_(CGPointMake(sl.x - self._ox, sl.y - self._oy))
 
 
 class AppDelegate(NSObject):
@@ -135,23 +158,30 @@ class AppDelegate(NSObject):
         NSApp.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
 
         self._nanobot_proc = None
+        self._log_lines = []
+        self._log_queue = collections.deque()
 
         self._setup_window()
+        self._setup_log_panel()
         self._setup_status_item()
         self._start_animation()
 
+        # ログキュー drain タイマー
+        drain_timer = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
+            0.25, self, "drainLogQueue:", None, True
+        )
+        NSRunLoop.currentRunLoop().addTimer_forMode_(drain_timer, NSRunLoopCommonModes)
+
     # ------------------------------------------------------------------
     def _screen_bounds(self):
-        """Usable roaming area (Cocoa coords, origin = bottom-left)."""
         screen = NSScreen.mainScreen()
         sf = screen.frame()
         w = sf.size.width
         h = sf.size.height
-        # Keep away from Dock (bottom) and menu bar (top)
         x_min = MARGIN
         x_max = w - UFO_SIZE - MARGIN
-        y_min = MARGIN + 20        # a bit above Dock
-        y_max = h - UFO_SIZE - 40  # below menu bar
+        y_min = MARGIN + 20
+        y_max = h - UFO_SIZE - 40
         return x_min, x_max, y_min, y_max
 
     def _random_waypoint(self):
@@ -162,15 +192,11 @@ class AppDelegate(NSObject):
     def _setup_window(self):
         screen = NSScreen.mainScreen()
         sf = screen.frame()
-        # Start at centre of screen
         start_x = (sf.size.width  - UFO_SIZE) / 2
         start_y = (sf.size.height - UFO_SIZE) / 2
 
-        # Current smooth position (float, updated every frame)
         self._pos_x = start_x
         self._pos_y = start_y
-
-        # First waypoint
         self._target_x, self._target_y = self._random_waypoint()
 
         rect = CGRectMake(start_x, start_y, UFO_SIZE, UFO_SIZE)
@@ -182,7 +208,7 @@ class AppDelegate(NSObject):
         )
         self._window.setOpaque_(False)
         self._window.setBackgroundColor_(NSColor.clearColor())
-        self._window.setLevel_(25)  # NSStatusWindowLevel
+        self._window.setLevel_(25)
         self._window.setCollectionBehavior_(
             NSWindowCollectionBehaviorCanJoinAllSpaces
             | NSWindowCollectionBehaviorStationary
@@ -193,22 +219,115 @@ class AppDelegate(NSObject):
         ufo_image = NSImage.alloc().initWithContentsOfFile_(
             os.path.join(assets_dir, "UFO.png")
         )
-        image_view = NSImageView.alloc().initWithFrame_(
-            CGRectMake(0, 0, UFO_SIZE, UFO_SIZE)
-        )
+        image_view = NSImageView.alloc().initWithFrame_(CGRectMake(0, 0, UFO_SIZE, UFO_SIZE))
         image_view.setImage_(ufo_image)
         image_view.setImageScaling_(NSImageScaleProportionallyUpOrDown)
         image_view.setWantsLayer_(True)
 
-        # クリック受け取り用の透明ビューをUFOの上に重ねる
-        click_view = ClickableView.alloc().initWithFrame_(
-            CGRectMake(0, 0, UFO_SIZE, UFO_SIZE)
-        )
+        click_view = ClickableView.alloc().initWithFrame_(CGRectMake(0, 0, UFO_SIZE, UFO_SIZE))
 
         self._window.contentView().addSubview_(image_view)
         self._window.contentView().addSubview_(click_view)
         self._window.orderFrontRegardless()
 
+    # ------------------------------------------------------------------
+    # Log panel
+    # ------------------------------------------------------------------
+    def _setup_log_panel(self):
+        screen = NSScreen.mainScreen()
+        sf = screen.frame()
+        # 初期位置: 左下
+        px = 20
+        py = 60
+
+        self._log_window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+            CGRectMake(px, py, PANEL_W, PANEL_H),
+            NSWindowStyleMaskBorderless,
+            NSBackingStoreBuffered,
+            False,
+        )
+        self._log_window.setOpaque_(False)
+        self._log_window.setBackgroundColor_(NSColor.clearColor())
+        self._log_window.setLevel_(24)  # UFO (25) の一段下
+        self._log_window.setCollectionBehavior_(
+            NSWindowCollectionBehaviorCanJoinAllSpaces
+            | NSWindowCollectionBehaviorStationary
+        )
+        self._log_window.setHasShadow_(False)
+
+        # ドラッグ可能な背景ビュー（角丸・半透明ダーク）
+        bg = LogPanelView.alloc().initWithFrame_(CGRectMake(0, 0, PANEL_W, PANEL_H))
+        bg.setWantsLayer_(True)
+        dark = NSColor.colorWithSRGBRed_green_blue_alpha_(0.05, 0.05, 0.05, 0.88)
+        bg.layer().setBackgroundColor_(dark.CGColor())
+        bg.layer().setCornerRadius_(12.0)
+
+        # スクロールビュー
+        p = PANEL_PADDING
+        inner_w = PANEL_W - p * 2
+        inner_h = PANEL_H - p * 2
+        scroll = NSScrollView.alloc().initWithFrame_(CGRectMake(p, p, inner_w, inner_h))
+        scroll.setHasVerticalScroller_(True)
+        scroll.setAutohidesScrollers_(True)
+        scroll.setBorderType_(0)
+        scroll.setDrawsBackground_(False)
+
+        # テキストビュー
+        self._log_text = NSTextView.alloc().initWithFrame_(CGRectMake(0, 0, inner_w, inner_h))
+        self._log_text.setEditable_(False)
+        self._log_text.setSelectable_(True)
+        self._log_text.setDrawsBackground_(False)
+        self._log_text.setVerticallyResizable_(True)
+        self._log_text.setHorizontallyResizable_(False)
+        self._log_text.textContainer().setWidthTracksTextView_(True)
+        self._log_text.setMinSize_((inner_w, inner_h))
+        self._log_text.setMaxSize_((inner_w, 1e8))
+
+        scroll.setDocumentView_(self._log_text)
+        bg.addSubview_(scroll)
+        self._log_window.contentView().addSubview_(bg)
+        # 起動時は非表示
+
+    @objc.typedSelector(b"v@:@")
+    def drainLogQueue_(self, timer):
+        if not self._log_queue:
+            return
+        changed = False
+        while self._log_queue:
+            try:
+                line = self._log_queue.popleft()
+                self._log_lines.append(line)
+                if len(self._log_lines) > LOG_MAX_LINES:
+                    self._log_lines.pop(0)
+                changed = True
+            except IndexError:
+                break
+        if changed:
+            self._refresh_log_view()
+
+    def _refresh_log_view(self):
+        text = "\n".join(self._log_lines)
+        font = NSFont.fontWithName_size_("Menlo", 10) or NSFont.monospacedSystemFontOfSize_weight_(10, 0)
+        color = NSColor.colorWithSRGBRed_green_blue_alpha_(0.2, 0.95, 0.45, 1.0)
+        attrs = {NSFontAttributeName: font, NSForegroundColorAttributeName: color}
+        attr_str = NSAttributedString.alloc().initWithString_attributes_(text, attrs)
+        self._log_text.textStorage().setAttributedString_(attr_str)
+        end = len(text)
+        self._log_text.scrollRangeToVisible_((end, 0))
+
+    def _read_nanobot_output(self, proc):
+        """バックグラウンドスレッド: nanobotのstdout/stderrを読んでキューに積む。"""
+        try:
+            for raw in iter(proc.stdout.readline, b""):
+                line = raw.decode("utf-8", errors="replace").rstrip()
+                if line:
+                    self._log_queue.append(line)
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # Menu bar
+    # ------------------------------------------------------------------
     def _setup_status_item(self):
         self._ufo_visible = True
 
@@ -218,7 +337,6 @@ class AppDelegate(NSObject):
 
         menu = NSMenu.alloc().init()
 
-        # UFO 浮遊トグル
         self._toggle_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "UFO 停止", "toggleUFO:", "u"
         )
@@ -227,12 +345,17 @@ class AppDelegate(NSObject):
 
         menu.addItem_(NSMenuItem.separatorItem())
 
-        # nanobot 起動/停止
         self._nanobot_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "nanobot 起動", "toggleNanobot:", "n"
         )
         self._nanobot_item.setTarget_(self)
         menu.addItem_(self._nanobot_item)
+
+        self._log_panel_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "ログを表示", "toggleLogPanel:", "l"
+        )
+        self._log_panel_item.setTarget_(self)
+        menu.addItem_(self._log_panel_item)
 
         menu.addItem_(NSMenuItem.separatorItem())
 
@@ -243,6 +366,7 @@ class AppDelegate(NSObject):
         menu.addItem_(quit_item)
 
         self._status_item.setMenu_(menu)
+        self._log_panel_visible = False
 
     def _update_menu_bar_icon(self):
         running = self._is_nanobot_running()
@@ -266,12 +390,18 @@ class AppDelegate(NSObject):
     def _start_nanobot(self):
         if self._is_nanobot_running():
             return
+        # ログをクリアして表示
+        self._log_lines.clear()
+        self._log_queue.clear()
+        self._refresh_log_view()
+        self._show_log_panel()
+
         try:
             self._nanobot_proc = subprocess.Popen(
                 ["uv", "run", "nanobot", "gateway"],
                 cwd=NANOBOT_DIR,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 preexec_fn=os.setsid,
             )
         except FileNotFoundError:
@@ -279,10 +409,19 @@ class AppDelegate(NSObject):
             self._nanobot_proc = subprocess.Popen(
                 [venv_bin, "gateway"],
                 cwd=NANOBOT_DIR,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 preexec_fn=os.setsid,
             )
+
+        # stdout読み取りスレッド起動
+        t = threading.Thread(
+            target=self._read_nanobot_output,
+            args=(self._nanobot_proc,),
+            daemon=True,
+        )
+        t.start()
+
         self._nanobot_item.setTitle_("nanobot 停止")
         self._update_menu_bar_icon()
 
@@ -297,6 +436,26 @@ class AppDelegate(NSObject):
         self._nanobot_proc = None
         self._nanobot_item.setTitle_("nanobot 起動")
         self._update_menu_bar_icon()
+
+    # ------------------------------------------------------------------
+    # Log panel visibility
+    # ------------------------------------------------------------------
+    def _show_log_panel(self):
+        self._log_window.orderFrontRegardless()
+        self._log_panel_visible = True
+        self._log_panel_item.setTitle_("ログを非表示")
+
+    def _hide_log_panel(self):
+        self._log_window.orderOut_(None)
+        self._log_panel_visible = False
+        self._log_panel_item.setTitle_("ログを表示")
+
+    @objc.typedSelector(b"v@:@")
+    def toggleLogPanel_(self, sender):
+        if self._log_panel_visible:
+            self._hide_log_panel()
+        else:
+            self._show_log_panel()
 
     # ------------------------------------------------------------------
     @objc.typedSelector(b"v@:@")
@@ -334,20 +493,16 @@ class AppDelegate(NSObject):
     def animationTick_(self, timer):
         t = time.monotonic() - self._start_time
 
-        # --- Roaming: move toward current waypoint at fixed speed ---
         dx = self._target_x - self._pos_x
         dy = self._target_y - self._pos_y
         dist = math.hypot(dx, dy)
 
         if dist < ARRIVE_THRESHOLD:
-            # Reached waypoint — pick the next one
             self._target_x, self._target_y = self._random_waypoint()
         else:
-            # Normalise direction and advance
             self._pos_x += (dx / dist) * ROAM_SPEED
             self._pos_y += (dy / dist) * ROAM_SPEED
 
-        # --- Wobble: gentle sine-wave layered on top of roaming ---
         wobble_y = WOBBLE_Y_AMP * math.sin(2.0 * math.pi * t / WOBBLE_PERIOD)
         wobble_x = WOBBLE_X_AMP * math.sin(2.0 * math.pi * t / (WOBBLE_PERIOD * 1.6))
 

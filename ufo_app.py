@@ -34,18 +34,38 @@ from Quartz import CGPointMake, CGRectMake
 
 
 class ClickableView(NSView):
-    """透明なクリック受け取りビュー。クリックでスクショを起動する。"""
+    """透明なクリック受け取りビュー。
+    シングルクリック → スクショ起動
+    ダブルクリック  → 浮遊トグル（停止 ↔ 再開）
+    """
 
-    _last_click = 0.0
+    _last_screenshot = 0.0
+    _pending_timer = None
 
     def acceptsFirstMouse_(self, event):
         return True
 
     def mouseDown_(self, event):
-        now = time.monotonic()
-        if now - ClickableView._last_click < 2.0:
+        if event.clickCount() == 2:
+            # ダブルクリック: 保留中のスクショをキャンセルして浮遊トグル
+            if ClickableView._pending_timer is not None:
+                ClickableView._pending_timer.invalidate()
+                ClickableView._pending_timer = None
+            NSApp.delegate().toggleAnimation()
             return
-        ClickableView._last_click = now
+
+        # シングルクリック: 300ms待ってダブルクリックでなければスクショ
+        now = time.monotonic()
+        if now - ClickableView._last_screenshot < 2.0:
+            return
+        ClickableView._last_screenshot = now
+        ClickableView._pending_timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+            0.3, self, "_fireScreenshot:", None, False
+        )
+
+    @objc.typedSelector(b"v@:@")
+    def _fireScreenshot_(self, timer):
+        ClickableView._pending_timer = None
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d at %H.%M.%S")
         save_path = os.path.expanduser(f"~/Desktop/Screenshot {timestamp}.png")
         subprocess.Popen(["screencapture", "-i", "-s", save_path])
@@ -170,6 +190,9 @@ class AppDelegate(NSObject):
 
     @objc.typedSelector(b"v@:@")
     def toggleUFO_(self, sender):
+        self.toggleAnimation()
+
+    def toggleAnimation(self):
         if self._ufo_visible:
             self._timer.invalidate()
             self._ufo_visible = False

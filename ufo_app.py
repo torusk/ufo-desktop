@@ -118,16 +118,48 @@ class AppDelegate(NSObject):
         self._window.orderFrontRegardless()
 
     def _setup_status_item(self):
+        self._ufo_visible = True
+
         status_bar = NSStatusBar.systemStatusBar()
         self._status_item = status_bar.statusItemWithLength_(-1)
         self._status_item.button().setTitle_("🛸")
 
         menu = NSMenu.alloc().init()
-        quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "終了", "terminate:", "q"
+
+        self._toggle_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "UFO 停止", "toggleUFO:", "u"
         )
+        self._toggle_item.setTarget_(self)
+        menu.addItem_(self._toggle_item)
+
+        menu.addItem_(NSMenuItem.separatorItem())
+
+        quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "終了", "quitApp:", "q"
+        )
+        quit_item.setTarget_(self)
         menu.addItem_(quit_item)
+
         self._status_item.setMenu_(menu)
+
+    @objc.typedSelector(b"v@:@")
+    def toggleUFO_(self, sender):
+        if self._ufo_visible:
+            self._window.orderOut_(None)
+            self._timer.invalidate()
+            self._ufo_visible = False
+            self._toggle_item.setTitle_("UFO 起動")
+            self._status_item.button().setTitle_("🛸💤")
+        else:
+            self._window.orderFrontRegardless()
+            self._start_animation()
+            self._ufo_visible = True
+            self._toggle_item.setTitle_("UFO 停止")
+            self._status_item.button().setTitle_("🛸")
+
+    @objc.typedSelector(b"v@:@")
+    def quitApp_(self, sender):
+        NSApp.terminate_(None)
 
     # ------------------------------------------------------------------
     def _start_animation(self):

@@ -38,6 +38,9 @@ class ClickableView(NSView):
 
     _last_click = 0.0
 
+    def acceptsFirstMouse_(self, event):
+        return True
+
     def mouseDown_(self, event):
         now = time.monotonic()
         if now - ClickableView._last_click < 2.0:

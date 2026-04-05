@@ -15,6 +15,7 @@ from AppKit import (
     NSApplicationActivationPolicyAccessory,
     NSBackingStoreBuffered,
     NSColor,
+    NSEvent,
     NSImage,
     NSImageScaleProportionallyUpOrDown,
     NSImageView,
@@ -48,6 +49,12 @@ class ClickableView(NSView):
         return True
 
     def mouseDown_(self, event):
+        self._dragged = False
+        # ドラッグ用にクリック位置（ウィンドウ内座標）を保存
+        loc = event.locationInWindow()
+        self._drag_offset_x = loc.x
+        self._drag_offset_y = loc.y
+
         if event.clickCount() == 2:
             # ダブルクリック: 保留中のスクショをキャンセルして浮遊トグル
             if ClickableView._pending_timer is not None:
@@ -56,7 +63,7 @@ class ClickableView(NSView):
             NSApp.delegate().toggleAnimation()
             return
 
-        # シングルクリック: 300ms待ってダブルクリックでなければスクショ
+        # シングルクリック: 300ms待ってダブルクリック/ドラッグでなければスクショ
         now = time.monotonic()
         if now - ClickableView._last_screenshot < 2.0:
             return
@@ -66,6 +73,33 @@ class ClickableView(NSView):
         )
         NSRunLoop.currentRunLoop().addTimer_forMode_(t, NSRunLoopCommonModes)
         ClickableView._pending_timer = t
+
+    def mouseDragged_(self, event):
+        delegate = NSApp.delegate()
+        if delegate._ufo_visible:  # アニメーション中はドラッグしない
+            return
+
+        # ドラッグ開始: スクショタイマーをキャンセル
+        if not self._dragged:
+            self._dragged = True
+            if ClickableView._pending_timer is not None:
+                ClickableView._pending_timer.invalidate()
+                ClickableView._pending_timer = None
+
+        # スクリーン座標でマウス位置を取得して窓を移動
+        screen_loc = NSEvent.mouseLocation()
+        new_x = screen_loc.x - self._drag_offset_x
+        new_y = screen_loc.y - self._drag_offset_y
+        self.window().setFrameOrigin_(CGPointMake(new_x, new_y))
+
+    def mouseUp_(self, event):
+        if self._dragged:
+            # ドロップ位置をデリゲートに反映（再開時にここから動き出す）
+            origin = self.window().frame().origin
+            delegate = NSApp.delegate()
+            delegate._pos_x = origin.x
+            delegate._pos_y = origin.y
+            self._dragged = False
 
     @objc.typedSelector(b"v@:@")
     def fireScreenshot_(self, timer):

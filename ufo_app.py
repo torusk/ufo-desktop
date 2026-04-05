@@ -168,13 +168,11 @@ class AppDelegate(NSObject):
     @objc.typedSelector(b"v@:@")
     def toggleUFO_(self, sender):
         if self._ufo_visible:
-            self._window.orderOut_(None)
             self._timer.invalidate()
             self._ufo_visible = False
             self._toggle_item.setTitle_("UFO 起動")
             self._status_item.button().setTitle_("🛸💤")
         else:
-            self._window.orderFrontRegardless()
             self._start_animation()
             self._ufo_visible = True
             self._toggle_item.setTitle_("UFO 停止")

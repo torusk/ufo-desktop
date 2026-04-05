@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""UFO Desktop App - Phase 1: Floating UFO display for macOS"""
+"""UFO Desktop App - Phase 1: Floating UFO roaming the entire desktop"""
 
 import math
 import os
+import random
 import time
 
 import objc
@@ -28,34 +29,64 @@ from AppKit import (
 )
 from Quartz import CGPointMake, CGRectMake
 
-# --- Animation constants ---
+# --- Display ---
 UFO_SIZE = 120
-VERTICAL_AMPLITUDE = 12.0    # px up/down
-HORIZONTAL_AMPLITUDE = 4.0   # px left/right
-ANIMATION_PERIOD = 3.0       # seconds per full vertical cycle
-TIMER_INTERVAL = 1.0 / 60.0  # 60 fps
+
+# --- Roaming ---
+ROAM_SPEED = 1.8          # px per frame (≈108 px/s at 60fps)
+ARRIVE_THRESHOLD = 60.0   # px — how close before picking next waypoint
+MARGIN = 60               # keep UFO this far from screen edges
+
+# --- Floating wobble on top of roaming ---
+WOBBLE_Y_AMP = 8.0        # px vertical wobble amplitude
+WOBBLE_X_AMP = 3.0        # px horizontal wobble amplitude
+WOBBLE_PERIOD = 2.8       # seconds
+
+TIMER_INTERVAL = 1.0 / 60.0
 
 
 class AppDelegate(NSObject):
     def applicationDidFinishLaunching_(self, notification):
-        # Background app: no dock icon, but still functional
         NSApp.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
 
         self._setup_window()
         self._setup_status_item()
         self._start_animation()
 
+    # ------------------------------------------------------------------
+    def _screen_bounds(self):
+        """Usable roaming area (Cocoa coords, origin = bottom-left)."""
+        screen = NSScreen.mainScreen()
+        sf = screen.frame()
+        w = sf.size.width
+        h = sf.size.height
+        # Keep away from Dock (bottom) and menu bar (top)
+        x_min = MARGIN
+        x_max = w - UFO_SIZE - MARGIN
+        y_min = MARGIN + 20        # a bit above Dock
+        y_max = h - UFO_SIZE - 40  # below menu bar
+        return x_min, x_max, y_min, y_max
+
+    def _random_waypoint(self):
+        x_min, x_max, y_min, y_max = self._screen_bounds()
+        return random.uniform(x_min, x_max), random.uniform(y_min, y_max)
+
+    # ------------------------------------------------------------------
     def _setup_window(self):
         screen = NSScreen.mainScreen()
         sf = screen.frame()
-        screen_w = sf.size.width
-        screen_h = sf.size.height
+        # Start at centre of screen
+        start_x = (sf.size.width  - UFO_SIZE) / 2
+        start_y = (sf.size.height - UFO_SIZE) / 2
 
-        # Default position: bottom-right, above Dock
-        self._base_x = screen_w - UFO_SIZE - 40.0
-        self._base_y = 80.0
+        # Current smooth position (float, updated every frame)
+        self._pos_x = start_x
+        self._pos_y = start_y
 
-        rect = CGRectMake(self._base_x, self._base_y, UFO_SIZE, UFO_SIZE)
+        # First waypoint
+        self._target_x, self._target_y = self._random_waypoint()
+
+        rect = CGRectMake(start_x, start_y, UFO_SIZE, UFO_SIZE)
         self._window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
             rect,
             NSWindowStyleMaskBorderless,
@@ -72,11 +103,10 @@ class AppDelegate(NSObject):
         )
         self._window.setHasShadow_(False)
 
-        # Load and display UFO image
         assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
-        image_path = os.path.join(assets_dir, "UFO.png")
-        ufo_image = NSImage.alloc().initWithContentsOfFile_(image_path)
-
+        ufo_image = NSImage.alloc().initWithContentsOfFile_(
+            os.path.join(assets_dir, "UFO.png")
+        )
         image_view = NSImageView.alloc().initWithFrame_(
             CGRectMake(0, 0, UFO_SIZE, UFO_SIZE)
         )
@@ -93,13 +123,13 @@ class AppDelegate(NSObject):
         self._status_item.button().setTitle_("🛸")
 
         menu = NSMenu.alloc().init()
-
         quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "終了", "terminate:", "q"
         )
         menu.addItem_(quit_item)
         self._status_item.setMenu_(menu)
 
+    # ------------------------------------------------------------------
     def _start_animation(self):
         self._start_time = time.monotonic()
         self._timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
@@ -114,15 +144,26 @@ class AppDelegate(NSObject):
     def animationTick_(self, timer):
         t = time.monotonic() - self._start_time
 
-        # Sine-wave floating: vertical uses base period, horizontal uses a slightly
-        # different period to create a natural Lissajous-like drift
-        dy = VERTICAL_AMPLITUDE * math.sin(2.0 * math.pi * t / ANIMATION_PERIOD)
-        dx = HORIZONTAL_AMPLITUDE * math.sin(2.0 * math.pi * t / (ANIMATION_PERIOD * 1.7))
+        # --- Roaming: move toward current waypoint at fixed speed ---
+        dx = self._target_x - self._pos_x
+        dy = self._target_y - self._pos_y
+        dist = math.hypot(dx, dy)
 
-        new_x = self._base_x + dx
-        new_y = self._base_y + dy
+        if dist < ARRIVE_THRESHOLD:
+            # Reached waypoint — pick the next one
+            self._target_x, self._target_y = self._random_waypoint()
+        else:
+            # Normalise direction and advance
+            self._pos_x += (dx / dist) * ROAM_SPEED
+            self._pos_y += (dy / dist) * ROAM_SPEED
 
-        self._window.setFrameOrigin_(CGPointMake(new_x, new_y))
+        # --- Wobble: gentle sine-wave layered on top of roaming ---
+        wobble_y = WOBBLE_Y_AMP * math.sin(2.0 * math.pi * t / WOBBLE_PERIOD)
+        wobble_x = WOBBLE_X_AMP * math.sin(2.0 * math.pi * t / (WOBBLE_PERIOD * 1.6))
+
+        self._window.setFrameOrigin_(
+            CGPointMake(self._pos_x + wobble_x, self._pos_y + wobble_y)
+        )
 
 
 def main():

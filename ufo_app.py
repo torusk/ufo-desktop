@@ -64,8 +64,10 @@ class ClickableView(NSView):
             if now - ClickableView._last_screenshot < 2.0:
                 return
             ClickableView._last_screenshot = now
+            capture_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ufocapture")
+            os.makedirs(capture_dir, exist_ok=True)
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d at %H.%M.%S")
-            save_path = os.path.expanduser(f"~/Desktop/Screenshot {timestamp}.png")
+            save_path = os.path.join(capture_dir, f"Screenshot {timestamp}.png")
             subprocess.Popen(["screencapture", "-i", "-s", save_path])
             return
 

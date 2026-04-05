@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """UFO Desktop App - Phase 1: Floating UFO roaming the entire desktop"""
 
+import datetime
 import math
 import os
 import random
@@ -35,8 +36,16 @@ from Quartz import CGPointMake, CGRectMake
 class ClickableView(NSView):
     """透明なクリック受け取りビュー。クリックでスクショを起動する。"""
 
+    _last_click = 0.0
+
     def mouseDown_(self, event):
-        subprocess.Popen(["screencapture", "-i", "-s"])
+        now = time.monotonic()
+        if now - ClickableView._last_click < 2.0:
+            return
+        ClickableView._last_click = now
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d at %H.%M.%S")
+        save_path = os.path.expanduser(f"~/Desktop/Screenshot {timestamp}.png")
+        subprocess.Popen(["screencapture", "-i", "-s", save_path])
 
 # --- Display ---
 UFO_SIZE = 120

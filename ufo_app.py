@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""UFO Desktop App - Phase 1: Floating UFO roaming the entire desktop"""
+"""UFO Desktop App - Floating UFO with nanobot gateway control"""
 
 import datetime
 import math
 import os
 import random
+import signal
 import subprocess
 import time
 
@@ -110,6 +111,9 @@ class ClickableView(NSView):
         ClickableView._pending_timer = None
         NSApp.delegate().toggleAnimation()
 
+# --- Nanobot ---
+NANOBOT_DIR = os.path.expanduser("~/Desktop/nanobot")
+
 # --- Display ---
 UFO_SIZE = 120
 
@@ -129,6 +133,8 @@ TIMER_INTERVAL = 1.0 / 60.0
 class AppDelegate(NSObject):
     def applicationDidFinishLaunching_(self, notification):
         NSApp.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+
+        self._nanobot_proc = None
 
         self._setup_window()
         self._setup_status_item()
@@ -208,15 +214,25 @@ class AppDelegate(NSObject):
 
         status_bar = NSStatusBar.systemStatusBar()
         self._status_item = status_bar.statusItemWithLength_(-1)
-        self._status_item.button().setTitle_("🛸")
+        self._update_menu_bar_icon()
 
         menu = NSMenu.alloc().init()
 
+        # UFO 浮遊トグル
         self._toggle_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "UFO 停止", "toggleUFO:", "u"
         )
         self._toggle_item.setTarget_(self)
         menu.addItem_(self._toggle_item)
+
+        menu.addItem_(NSMenuItem.separatorItem())
+
+        # nanobot 起動/停止
+        self._nanobot_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "nanobot 起動", "toggleNanobot:", "n"
+        )
+        self._nanobot_item.setTarget_(self)
+        menu.addItem_(self._nanobot_item)
 
         menu.addItem_(NSMenuItem.separatorItem())
 
@@ -228,6 +244,61 @@ class AppDelegate(NSObject):
 
         self._status_item.setMenu_(menu)
 
+    def _update_menu_bar_icon(self):
+        running = self._is_nanobot_running()
+        self._status_item.button().setTitle_("🛸" if running else "🛸💤")
+
+    def _is_nanobot_running(self):
+        if self._nanobot_proc is None:
+            return False
+        return self._nanobot_proc.poll() is None
+
+    # ------------------------------------------------------------------
+    # Nanobot gateway control
+    # ------------------------------------------------------------------
+    @objc.typedSelector(b"v@:@")
+    def toggleNanobot_(self, sender):
+        if self._is_nanobot_running():
+            self._stop_nanobot()
+        else:
+            self._start_nanobot()
+
+    def _start_nanobot(self):
+        if self._is_nanobot_running():
+            return
+        try:
+            self._nanobot_proc = subprocess.Popen(
+                ["uv", "run", "nanobot", "gateway"],
+                cwd=NANOBOT_DIR,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                preexec_fn=os.setsid,
+            )
+        except FileNotFoundError:
+            venv_bin = os.path.join(NANOBOT_DIR, ".venv", "bin", "nanobot")
+            self._nanobot_proc = subprocess.Popen(
+                [venv_bin, "gateway"],
+                cwd=NANOBOT_DIR,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                preexec_fn=os.setsid,
+            )
+        self._nanobot_item.setTitle_("nanobot 停止")
+        self._update_menu_bar_icon()
+
+    def _stop_nanobot(self):
+        if not self._is_nanobot_running():
+            return
+        os.killpg(os.getpgid(self._nanobot_proc.pid), signal.SIGTERM)
+        try:
+            self._nanobot_proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            os.killpg(os.getpgid(self._nanobot_proc.pid), signal.SIGKILL)
+        self._nanobot_proc = None
+        self._nanobot_item.setTitle_("nanobot 起動")
+        self._update_menu_bar_icon()
+
+    # ------------------------------------------------------------------
     @objc.typedSelector(b"v@:@")
     def toggleUFO_(self, sender):
         self.toggleAnimation()
@@ -237,16 +308,19 @@ class AppDelegate(NSObject):
             self._timer.invalidate()
             self._ufo_visible = False
             self._toggle_item.setTitle_("UFO 起動")
-            self._status_item.button().setTitle_("🛸💤")
         else:
             self._start_animation()
             self._ufo_visible = True
             self._toggle_item.setTitle_("UFO 停止")
-            self._status_item.button().setTitle_("🛸")
+        self._update_menu_bar_icon()
 
     @objc.typedSelector(b"v@:@")
     def quitApp_(self, sender):
+        self._stop_nanobot()
         NSApp.terminate_(None)
+
+    def applicationWillTerminate_(self, notification):
+        self._stop_nanobot()
 
     # ------------------------------------------------------------------
     def _start_animation(self):

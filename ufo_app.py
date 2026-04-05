@@ -21,6 +21,8 @@ from AppKit import (
     NSMenu,
     NSMenuItem,
     NSObject,
+    NSRunLoop,
+    NSRunLoopCommonModes,
     NSScreen,
     NSStatusBar,
     NSTimer,
@@ -59,12 +61,14 @@ class ClickableView(NSView):
         if now - ClickableView._last_screenshot < 2.0:
             return
         ClickableView._last_screenshot = now
-        ClickableView._pending_timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-            0.3, self, "_fireScreenshot:", None, False
+        t = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
+            0.3, self, "fireScreenshot:", None, False
         )
+        NSRunLoop.currentRunLoop().addTimer_forMode_(t, NSRunLoopCommonModes)
+        ClickableView._pending_timer = t
 
     @objc.typedSelector(b"v@:@")
-    def _fireScreenshot_(self, timer):
+    def fireScreenshot_(self, timer):
         ClickableView._pending_timer = None
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d at %H.%M.%S")
         save_path = os.path.expanduser(f"~/Desktop/Screenshot {timestamp}.png")
@@ -211,13 +215,10 @@ class AppDelegate(NSObject):
     # ------------------------------------------------------------------
     def _start_animation(self):
         self._start_time = time.monotonic()
-        self._timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-            TIMER_INTERVAL,
-            self,
-            "animationTick:",
-            None,
-            True,
+        self._timer = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
+            TIMER_INTERVAL, self, "animationTick:", None, True
         )
+        NSRunLoop.currentRunLoop().addTimer_forMode_(self._timer, NSRunLoopCommonModes)
 
     @objc.typedSelector(b"v@:@")
     def animationTick_(self, timer):

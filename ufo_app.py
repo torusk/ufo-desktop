@@ -42,8 +42,8 @@ class ClickableView(NSView):
     ダブルクリック  → 浮遊トグル（停止 ↔ 再開）
     """
 
-    _last_screenshot = 0.0
-    _pending_timer = None
+    _last_screenshot = 0.0  # スクショの連続発火防止
+    _pending_timer = None   # シングルクリック判定用遅延タイマー
 
     def acceptsFirstMouse_(self, event):
         return True
@@ -56,20 +56,22 @@ class ClickableView(NSView):
         self._drag_offset_y = loc.y
 
         if event.clickCount() == 2:
-            # ダブルクリック: 保留中のスクショをキャンセルして浮遊トグル
+            # ダブルクリック: 保留中のトグルをキャンセルしてスクショ
             if ClickableView._pending_timer is not None:
                 ClickableView._pending_timer.invalidate()
                 ClickableView._pending_timer = None
-            NSApp.delegate().toggleAnimation()
+            now = time.monotonic()
+            if now - ClickableView._last_screenshot < 2.0:
+                return
+            ClickableView._last_screenshot = now
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d at %H.%M.%S")
+            save_path = os.path.expanduser(f"~/Desktop/Screenshot {timestamp}.png")
+            subprocess.Popen(["screencapture", "-i", "-s", save_path])
             return
 
-        # シングルクリック: 300ms待ってダブルクリック/ドラッグでなければスクショ
-        now = time.monotonic()
-        if now - ClickableView._last_screenshot < 2.0:
-            return
-        ClickableView._last_screenshot = now
+        # シングルクリック: 300ms待ってダブルクリック/ドラッグでなければ浮遊トグル
         t = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
-            0.3, self, "fireScreenshot:", None, False
+            0.3, self, "fireToggle:", None, False
         )
         NSRunLoop.currentRunLoop().addTimer_forMode_(t, NSRunLoopCommonModes)
         ClickableView._pending_timer = t
@@ -102,11 +104,9 @@ class ClickableView(NSView):
             self._dragged = False
 
     @objc.typedSelector(b"v@:@")
-    def fireScreenshot_(self, timer):
+    def fireToggle_(self, timer):
         ClickableView._pending_timer = None
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d at %H.%M.%S")
-        save_path = os.path.expanduser(f"~/Desktop/Screenshot {timestamp}.png")
-        subprocess.Popen(["screencapture", "-i", "-s", save_path])
+        NSApp.delegate().toggleAnimation()
 
 # --- Display ---
 UFO_SIZE = 120

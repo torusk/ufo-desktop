@@ -55,6 +55,10 @@ ufo-desktop/
 - Memory: <50MB
 - Startup: <2s
 
+## Workflow Rules
+
+- **作業完了後は必ずGitHubにコミット＆プッシュする**（機能追加・バグ修正問わず毎回）
+
 ## Phase 3 AI Integration Notes
 
 - Uses Anthropic Claude API for folder image analysis

@@ -4,6 +4,7 @@
 import math
 import os
 import random
+import subprocess
 import time
 
 import objc
@@ -22,12 +23,20 @@ from AppKit import (
     NSScreen,
     NSStatusBar,
     NSTimer,
+    NSView,
     NSWindow,
     NSWindowCollectionBehaviorCanJoinAllSpaces,
     NSWindowCollectionBehaviorStationary,
     NSWindowStyleMaskBorderless,
 )
 from Quartz import CGPointMake, CGRectMake
+
+
+class ClickableView(NSView):
+    """透明なクリック受け取りビュー。クリックでスクショを起動する。"""
+
+    def mouseDown_(self, event):
+        subprocess.Popen(["screencapture", "-i", "-s"])
 
 # --- Display ---
 UFO_SIZE = 120
@@ -96,7 +105,6 @@ class AppDelegate(NSObject):
         self._window.setOpaque_(False)
         self._window.setBackgroundColor_(NSColor.clearColor())
         self._window.setLevel_(25)  # NSStatusWindowLevel
-        self._window.setIgnoresMouseEvents_(True)
         self._window.setCollectionBehavior_(
             NSWindowCollectionBehaviorCanJoinAllSpaces
             | NSWindowCollectionBehaviorStationary
@@ -114,7 +122,13 @@ class AppDelegate(NSObject):
         image_view.setImageScaling_(NSImageScaleProportionallyUpOrDown)
         image_view.setWantsLayer_(True)
 
+        # クリック受け取り用の透明ビューをUFOの上に重ねる
+        click_view = ClickableView.alloc().initWithFrame_(
+            CGRectMake(0, 0, UFO_SIZE, UFO_SIZE)
+        )
+
         self._window.contentView().addSubview_(image_view)
+        self._window.contentView().addSubview_(click_view)
         self._window.orderFrontRegardless()
 
     def _setup_status_item(self):

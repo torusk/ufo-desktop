@@ -7,6 +7,7 @@ import json
 import math
 import os
 import random
+import shutil
 import signal
 import subprocess
 import threading
@@ -52,6 +53,13 @@ from Quartz import CGPointMake, CGRectMake
 
 # --- Nanobot ---
 NANOBOT_DIR = os.path.expanduser("~/Desktop/nanobot")
+
+# --- Auto-start (Launch Agent) ---
+LAUNCH_AGENT_LABEL = "com.ufo.desktop"
+LAUNCH_AGENT_PLIST = os.path.expanduser(
+    f"~/Library/LaunchAgents/{LAUNCH_AGENT_LABEL}.plist"
+)
+APP_SCRIPT = os.path.abspath(__file__)
 
 # --- Telegram ---
 TELEGRAM_CONFIG_PATH = os.path.expanduser("~/.ufo_config.json")
@@ -673,6 +681,15 @@ class AppDelegate(NSObject):
 
         menu.addItem_(NSMenuItem.separatorItem())
 
+        self._autostart_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "ログイン時に自動起動", "toggleAutostart:", ""
+        )
+        self._autostart_item.setTarget_(self)
+        self._autostart_item.setState_(1 if self._is_autostart_enabled() else 0)
+        menu.addItem_(self._autostart_item)
+
+        menu.addItem_(NSMenuItem.separatorItem())
+
         quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "終了", "quitApp:", "q"
         )
@@ -681,6 +698,54 @@ class AppDelegate(NSObject):
 
         self._status_item.setMenu_(menu)
         self._log_panel_visible = False
+
+    # ------------------------------------------------------------------
+    # Auto-start (Launch Agent)
+    # ------------------------------------------------------------------
+    def _is_autostart_enabled(self):
+        return os.path.exists(LAUNCH_AGENT_PLIST)
+
+    @objc.typedSelector(b"v@:@")
+    def toggleAutostart_(self, sender):
+        if self._is_autostart_enabled():
+            self._disable_autostart()
+        else:
+            self._enable_autostart()
+        self._autostart_item.setState_(1 if self._is_autostart_enabled() else 0)
+
+    def _enable_autostart(self):
+        uv = shutil.which("uv") or "/opt/homebrew/bin/uv"
+        plist = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{LAUNCH_AGENT_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{uv}</string>
+        <string>run</string>
+        <string>python</string>
+        <string>{APP_SCRIPT}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <false/>
+    <key>ProcessType</key>
+    <string>Interactive</string>
+</dict>
+</plist>"""
+        os.makedirs(os.path.dirname(LAUNCH_AGENT_PLIST), exist_ok=True)
+        with open(LAUNCH_AGENT_PLIST, "w") as f:
+            f.write(plist)
+        subprocess.run(["launchctl", "load", LAUNCH_AGENT_PLIST], check=False)
+
+    def _disable_autostart(self):
+        if os.path.exists(LAUNCH_AGENT_PLIST):
+            subprocess.run(["launchctl", "unload", LAUNCH_AGENT_PLIST], check=False)
+            os.remove(LAUNCH_AGENT_PLIST)
 
     def _update_menu_bar_icon(self):
         running = self._is_nanobot_running()

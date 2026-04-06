@@ -142,6 +142,10 @@ class ClickableView(NSView):
             delegate._pos_y = origin.y
             self._dragged = False
 
+    def rightMouseDown_(self, event):
+        menu = NSApp.delegate()._status_item.menu()
+        NSMenu.popUpContextMenu_withEvent_forView_(menu, event, self)
+
     @objc.typedSelector(b"v@:@")
     def fireToggle_(self, timer):
         ClickableView._pending_timer = None
@@ -333,8 +337,8 @@ class AppDelegate(NSObject):
 
         bg = NSView.alloc().initWithFrame_(CGRectMake(0, 0, MSG_PANEL_W, MSG_PANEL_H))
         bg.setWantsLayer_(True)
-        dark = NSColor.colorWithSRGBRed_green_blue_alpha_(0.08, 0.08, 0.12, 0.85)
-        bg.layer().setBackgroundColor_(dark.CGColor())
+        light = NSColor.colorWithSRGBRed_green_blue_alpha_(0.88, 0.88, 0.88, 0.55)
+        bg.layer().setBackgroundColor_(light.CGColor())
         bg.layer().setCornerRadius_(10.0)
 
         p = 7
@@ -342,10 +346,10 @@ class AppDelegate(NSObject):
         self._msg_field = NSTextField.alloc().initWithFrame_(
             CGRectMake(p, p, MSG_PANEL_W - p * 2, field_h)
         )
-        self._msg_field.setPlaceholderString_("📨 Telegramへ送信... (Enter)")
+        self._msg_field.setPlaceholderString_("Telegramへ送信... (Enter)")
         self._msg_field.setBezeled_(False)
         self._msg_field.setDrawsBackground_(False)
-        self._msg_field.setTextColor_(NSColor.whiteColor())
+        self._msg_field.setTextColor_(NSColor.darkGrayColor())
         self._msg_field.setFont_(NSFont.systemFontOfSize_(12))
         self._msg_field.setAction_("sendTelegramMessage:")
         self._msg_field.setTarget_(self)
@@ -362,9 +366,9 @@ class AppDelegate(NSObject):
         self._msg_window.setFrameOrigin_(CGPointMake(mx, my))
 
     def _show_msg_panel(self):
+        self._msg_panel_visible = True  # 先にセットしないと位置更新がスキップされる
         self._update_msg_panel_position()
         self._msg_window.orderFrontRegardless()
-        self._msg_panel_visible = True
         self._msg_panel_item.setTitle_("メッセージ欄を非表示")
 
     def _hide_msg_panel(self):

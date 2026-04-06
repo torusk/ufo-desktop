@@ -3,6 +3,7 @@
 
 import collections
 import datetime
+import json
 import math
 import os
 import random
@@ -10,6 +11,8 @@ import signal
 import subprocess
 import threading
 import time
+import urllib.error
+import urllib.request
 
 import objc
 from AppKit import (
@@ -34,6 +37,7 @@ from AppKit import (
     NSScreen,
     NSScrollView,
     NSStatusBar,
+    NSTextField,
     NSTextView,
     NSTimer,
     NSView,
@@ -46,6 +50,13 @@ from Quartz import CGPointMake, CGRectMake
 
 # --- Nanobot ---
 NANOBOT_DIR = os.path.expanduser("~/Desktop/nanobot")
+
+# --- Telegram ---
+TELEGRAM_CONFIG_PATH = os.path.expanduser("~/.ufo_config.json")
+
+# --- Message panel ---
+MSG_PANEL_W = 230
+MSG_PANEL_H = 42
 
 # --- Display ---
 UFO_SIZE = 120
@@ -137,6 +148,16 @@ class ClickableView(NSView):
         NSApp.delegate().toggleAnimation()
 
 
+class KeyableWindow(NSWindow):
+    """キーボード入力を受け付けるボーダレスウィンドウ。"""
+
+    def canBecomeKeyWindow(self):
+        return True
+
+    def canBecomeMainWindow(self):
+        return False
+
+
 class LogPanelView(NSView):
     """ログパネルのドラッグ用ビュー。"""
 
@@ -163,6 +184,7 @@ class AppDelegate(NSObject):
 
         self._setup_window()
         self._setup_log_panel()
+        self._setup_message_panel()
         self._setup_status_item()
         self._start_animation()
 
@@ -288,6 +310,127 @@ class AppDelegate(NSObject):
         self._log_window.contentView().addSubview_(bg)
         # 起動時は非表示
 
+    # ------------------------------------------------------------------
+    # Message panel (Telegram送信)
+    # ------------------------------------------------------------------
+    def _setup_message_panel(self):
+        self._msg_panel_visible = False
+
+        self._msg_window = KeyableWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+            CGRectMake(0, 0, MSG_PANEL_W, MSG_PANEL_H),
+            NSWindowStyleMaskBorderless,
+            NSBackingStoreBuffered,
+            False,
+        )
+        self._msg_window.setOpaque_(False)
+        self._msg_window.setBackgroundColor_(NSColor.clearColor())
+        self._msg_window.setLevel_(25)
+        self._msg_window.setCollectionBehavior_(
+            NSWindowCollectionBehaviorCanJoinAllSpaces
+            | NSWindowCollectionBehaviorStationary
+        )
+        self._msg_window.setHasShadow_(False)
+
+        bg = NSView.alloc().initWithFrame_(CGRectMake(0, 0, MSG_PANEL_W, MSG_PANEL_H))
+        bg.setWantsLayer_(True)
+        dark = NSColor.colorWithSRGBRed_green_blue_alpha_(0.08, 0.08, 0.12, 0.85)
+        bg.layer().setBackgroundColor_(dark.CGColor())
+        bg.layer().setCornerRadius_(10.0)
+
+        p = 7
+        field_h = MSG_PANEL_H - p * 2
+        self._msg_field = NSTextField.alloc().initWithFrame_(
+            CGRectMake(p, p, MSG_PANEL_W - p * 2, field_h)
+        )
+        self._msg_field.setPlaceholderString_("📨 Telegramへ送信... (Enter)")
+        self._msg_field.setBezeled_(False)
+        self._msg_field.setDrawsBackground_(False)
+        self._msg_field.setTextColor_(NSColor.whiteColor())
+        self._msg_field.setFont_(NSFont.systemFontOfSize_(12))
+        self._msg_field.setAction_("sendTelegramMessage:")
+        self._msg_field.setTarget_(self)
+
+        bg.addSubview_(self._msg_field)
+        self._msg_window.contentView().addSubview_(bg)
+
+    def _update_msg_panel_position(self):
+        if not self._msg_panel_visible:
+            return
+        frame = self._window.frame()
+        mx = frame.origin.x + (UFO_SIZE - MSG_PANEL_W) / 2
+        my = frame.origin.y - MSG_PANEL_H - 5
+        self._msg_window.setFrameOrigin_(CGPointMake(mx, my))
+
+    def _show_msg_panel(self):
+        self._update_msg_panel_position()
+        self._msg_window.orderFrontRegardless()
+        self._msg_panel_visible = True
+        self._msg_panel_item.setTitle_("メッセージ欄を非表示")
+
+    def _hide_msg_panel(self):
+        self._msg_window.orderOut_(None)
+        self._msg_panel_visible = False
+        self._msg_panel_item.setTitle_("メッセージ欄を表示")
+
+    @objc.typedSelector(b"v@:@")
+    def toggleMsgPanel_(self, sender):
+        if self._msg_panel_visible:
+            self._hide_msg_panel()
+        else:
+            self._show_msg_panel()
+
+    @objc.typedSelector(b"v@:@")
+    def sendTelegramMessage_(self, sender):
+        text = self._msg_field.stringValue().strip()
+        if not text:
+            return
+        config = self._load_telegram_config()
+        if not config:
+            self._log_queue.append(
+                "[Telegram] 未設定: ~/.ufo_config.json に telegram_token と telegram_chat_id を設定してください"
+            )
+            self._show_log_panel()
+            return
+        token = config.get("telegram_token", "")
+        chat_id = str(config.get("telegram_chat_id", ""))
+        if not token or not chat_id:
+            self._log_queue.append("[Telegram] telegram_token または telegram_chat_id が未設定です")
+            self._show_log_panel()
+            return
+        self._msg_field.setStringValue_("")
+        threading.Thread(
+            target=self._send_telegram,
+            args=(token, chat_id, text),
+            daemon=True,
+        ).start()
+
+    def _send_telegram(self, token, chat_id, text):
+        try:
+            url = f"https://api.telegram.org/bot{token}/sendMessage"
+            payload = json.dumps({"chat_id": chat_id, "text": text}).encode()
+            req = urllib.request.Request(
+                url, data=payload, headers={"Content-Type": "application/json"}
+            )
+            urllib.request.urlopen(req, timeout=10)
+            self._log_queue.append(f"[Telegram] 送信完了: {text[:60]}")
+        except urllib.error.HTTPError as e:
+            body = e.read().decode(errors="replace")
+            self._log_queue.append(f"[Telegram] HTTPエラー {e.code}: {body[:120]}")
+        except Exception as e:
+            self._log_queue.append(f"[Telegram] 送信エラー: {e}")
+
+    def _load_telegram_config(self):
+        token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+        chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+        if token and chat_id:
+            return {"telegram_token": token, "telegram_chat_id": chat_id}
+        try:
+            with open(TELEGRAM_CONFIG_PATH) as f:
+                return json.load(f)
+        except Exception:
+            return None
+
+    # ------------------------------------------------------------------
     @objc.typedSelector(b"v@:@")
     def drainLogQueue_(self, timer):
         if not self._log_queue:
@@ -356,6 +499,18 @@ class AppDelegate(NSObject):
         )
         self._log_panel_item.setTarget_(self)
         menu.addItem_(self._log_panel_item)
+
+        self._msg_panel_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "メッセージ欄を表示", "toggleMsgPanel:", "m"
+        )
+        self._msg_panel_item.setTarget_(self)
+        menu.addItem_(self._msg_panel_item)
+
+        telegram_info_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Telegram設定を確認...", "showTelegramStatus:", ""
+        )
+        telegram_info_item.setTarget_(self)
+        menu.addItem_(telegram_info_item)
 
         menu.addItem_(NSMenuItem.separatorItem())
 
@@ -459,6 +614,21 @@ class AppDelegate(NSObject):
 
     # ------------------------------------------------------------------
     @objc.typedSelector(b"v@:@")
+    def showTelegramStatus_(self, sender):
+        config = self._load_telegram_config()
+        if config:
+            token = config.get("telegram_token", "")
+            chat_id = config.get("telegram_chat_id", "")
+            masked = token[:8] + "..." if len(token) > 8 else "(未設定)"
+            self._log_queue.append(f"[Telegram] token: {masked}  chat_id: {chat_id}")
+        else:
+            self._log_queue.append(
+                "[Telegram] 設定なし — ~/.ufo_config.json を作成してください\n"
+                '  例: {"telegram_token": "123:ABC...", "telegram_chat_id": "987654321"}'
+            )
+        self._show_log_panel()
+
+    @objc.typedSelector(b"v@:@")
     def toggleUFO_(self, sender):
         self.toggleAnimation()
 
@@ -509,6 +679,7 @@ class AppDelegate(NSObject):
         self._window.setFrameOrigin_(
             CGPointMake(self._pos_x + wobble_x, self._pos_y + wobble_y)
         )
+        self._update_msg_panel_position()
 
 
 def main():

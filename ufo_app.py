@@ -25,6 +25,7 @@ from AppKit import (
     NSColor,
     NSEvent,
     NSFont,
+    NSBackgroundColorAttributeName,
     NSFontAttributeName,
     NSForegroundColorAttributeName,
     NSImage,
@@ -136,6 +137,7 @@ class ClickableView(NSView):
         new_x = screen_loc.x - self._drag_offset_x
         new_y = screen_loc.y - self._drag_offset_y
         self.window().setFrameOrigin_(CGPointMake(new_x, new_y))
+        NSApp.delegate()._update_msg_panel_position()
 
     def mouseUp_(self, event):
         if self._dragged:
@@ -353,9 +355,7 @@ class AppDelegate(NSObject):
 
         bg = NSView.alloc().initWithFrame_(CGRectMake(0, 0, MSG_PANEL_W, MSG_PANEL_H))
         bg.setWantsLayer_(True)
-        light = NSColor.colorWithSRGBRed_green_blue_alpha_(0.88, 0.88, 0.88, 0.55)
-        bg.layer().setBackgroundColor_(light.CGColor())
-        bg.layer().setCornerRadius_(10.0)
+        bg.layer().setBackgroundColor_(NSColor.clearColor().CGColor())
 
         p = 7
         gap = 5
@@ -532,18 +532,34 @@ class AppDelegate(NSObject):
 
     def _refresh_chat_view(self):
         combined = NSMutableAttributedString.alloc().init()
-        sent_color = NSColor.colorWithSRGBRed_green_blue_alpha_(0.25, 0.25, 0.25, 1.0)
-        recv_color = NSColor.colorWithSRGBRed_green_blue_alpha_(0.1, 0.35, 0.65, 1.0)
+        sent_fg  = NSColor.colorWithSRGBRed_green_blue_alpha_(0.2,  0.2,  0.2,  1.0)
+        recv_fg  = NSColor.colorWithSRGBRed_green_blue_alpha_(0.05, 0.3,  0.6,  1.0)
+        sent_bg  = NSColor.colorWithSRGBRed_green_blue_alpha_(0.82, 0.82, 0.82, 0.55)
+        recv_bg  = NSColor.colorWithSRGBRed_green_blue_alpha_(0.78, 0.88, 0.96, 0.55)
+        spacer_attrs = {NSFontAttributeName: NSFont.systemFontOfSize_(3)}
         for direction, text in self._chat_messages:
-            color = sent_color if direction == "sent" else recv_color
-            prefix = "→ " if direction == "sent" else "← "
-            attrs = {NSFontAttributeName: self._chat_font, NSForegroundColorAttributeName: color}
+            fg = sent_fg if direction == "sent" else recv_fg
+            bg = sent_bg if direction == "sent" else recv_bg
+            prefix = "→  " if direction == "sent" else "←  "
+            attrs = {
+                NSFontAttributeName: self._chat_font,
+                NSForegroundColorAttributeName: fg,
+                NSBackgroundColorAttributeName: bg,
+            }
             part = NSAttributedString.alloc().initWithString_attributes_(
-                prefix + text + "\n", attrs
+                prefix + text, attrs
             )
             combined.appendAttributedString_(part)
+            # メッセージ間の区切り（背景なし改行）
+            spacer = NSAttributedString.alloc().initWithString_attributes_("\n", spacer_attrs)
+            combined.appendAttributedString_(spacer)
         self._chat_text.textStorage().setAttributedString_(combined)
         self._chat_text.scrollRangeToVisible_((combined.length(), 0))
+
+    @objc.typedSelector(b"v@:@")
+    def clearChat_(self, sender):
+        self._chat_messages.clear()
+        self._refresh_chat_view()
 
     # ------------------------------------------------------------------
     # Telegram ポーリング（nanobot停止中のみ動作）
@@ -642,6 +658,12 @@ class AppDelegate(NSObject):
         )
         self._msg_panel_item.setTarget_(self)
         menu.addItem_(self._msg_panel_item)
+
+        clear_chat_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "チャットをクリア", "clearChat:", ""
+        )
+        clear_chat_item.setTarget_(self)
+        menu.addItem_(clear_chat_item)
 
         telegram_info_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "Telegram設定を確認...", "showTelegramStatus:", ""

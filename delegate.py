@@ -73,8 +73,8 @@ WOBBLE_Y_AMP = 8.0     # 縦方向の振れ幅(px)
 WOBBLE_X_AMP = 3.0     # 横方向の振れ幅(px)
 WOBBLE_PERIOD = 2.8    # 周期(秒)
 
-# アニメーションタイマー間隔（60fps）
-TIMER_INTERVAL = 1.0 / 60.0
+# アニメーションタイマー間隔（30fps）
+TIMER_INTERVAL = 1.0 / 30.0
 
 # ログパネルのサイズ
 LOG_PANEL_W = 460
@@ -102,6 +102,10 @@ class AppDelegate(NSObject):
         # --- 状態変数の初期化 ---
         self._nanobot_proc = None
 
+        # メニューバーアイコンのアニメーション用カウンター
+        self._icon_tick = 0
+        self._chat_flash_ticks = 0  # >0 の間 💬🛸 を表示
+
         # ログパネル用: 行リスト + スレッド間受け渡しキュー
         self._log_lines = []
         self._log_queue = collections.deque()
@@ -111,9 +115,10 @@ class AppDelegate(NSObject):
         self._chat_queue = collections.deque()
 
         # Telegram ポーラー（nanobot 停止中のみ動作）
-        self._tg_poller = tg.TelegramPoller(
-            on_message=lambda text: self._chat_queue.append(("recv", text))
-        )
+        def _on_recv(text):
+            self._chat_queue.append(("recv", text))
+            self._chat_flash_ticks = 6  # 約3秒 💬🛸 を表示
+        self._tg_poller = tg.TelegramPoller(on_message=_on_recv)
 
         # --- UI セットアップ ---
         self._setup_ufo_window()
@@ -245,6 +250,13 @@ class AppDelegate(NSObject):
             CGPointMake(self._pos_x + wobble_x, self._pos_y + wobble_y)
         )
         self._update_msg_panel_position()
+
+        # メニューバーアイコンを 15tick（約0.5秒）ごとに更新
+        self._icon_tick += 1
+        if self._icon_tick % 15 == 0:
+            if self._chat_flash_ticks > 0:
+                self._chat_flash_ticks -= 1
+            self._update_menu_bar_icon()
 
     def toggleAnimation(self):
         """アニメーション（浮遊）のオン/オフを切り替える。"""
@@ -730,8 +742,15 @@ class AppDelegate(NSObject):
         return item
 
     def _update_menu_bar_icon(self):
-        """nanobot の稼働状態に合わせてメニューバーアイコンを更新する。"""
-        self._status_item.button().setTitle_("🛸" if self._is_nanobot_running() else "🛸💤")
+        """稼働状態に合わせてメニューバーアイコンを更新する。"""
+        if self._chat_flash_ticks > 0:
+            icon = "💬🛸"
+        elif self._is_nanobot_running():
+            # 交互に電撃アニメーション
+            icon = "⚡🛸" if (self._icon_tick // 15) % 2 == 0 else "🛸⚡"
+        else:
+            icon = "🛸"
+        self._status_item.button().setTitle_(icon)
 
     # -----------------------------------------------------------------------
     # アプリ終了

@@ -5,7 +5,9 @@ delegate.py — AppDelegate（アプリ全体の司令塔）
 UFO アプリの動作を制御する。
 """
 
+import base64
 import collections
+import json
 import math
 import os
 import random
@@ -13,6 +15,8 @@ import signal
 import subprocess
 import threading
 import time
+import urllib.error
+import urllib.request
 
 import objc
 from AppKit import (
@@ -23,6 +27,7 @@ from AppKit import (
     NSMutableAttributedString,
     NSBackingStoreBuffered,
     NSBackgroundColorAttributeName,
+    NSButton,
     NSColor,
     NSFont,
     NSFontAttributeName,
@@ -33,6 +38,8 @@ from AppKit import (
     NSMenu,
     NSMenuItem,
     NSObject,
+    NSOpenPanel,
+    NSPasteboard,
     NSRunLoop,
     NSRunLoopCommonModes,
     NSScreen,
@@ -47,6 +54,7 @@ from AppKit import (
     NSWindowCollectionBehaviorStationary,
     NSWindowStyleMaskBorderless,
 )
+from Foundation import NSURL
 from Quartz import CGPointMake, CGRectMake
 
 import autostart
@@ -89,6 +97,12 @@ MSG_PANEL_H = 170
 MSG_CHAT_H = 118   # チャット表示エリア（上部）の高さ
 MSG_INPUT_H = 28   # 入力フィールド（下部）の高さ
 
+# OCR パネルのサイズ
+OCR_PANEL_W = 300
+OCR_PANEL_H = 240
+OCR_PAD = 8
+OCR_BTN_H = 28
+
 
 # ---------------------------------------------------------------------------
 # AppDelegate
@@ -122,6 +136,10 @@ class AppDelegate(NSObject):
         self._chat_messages = []        # list of ("sent" | "recv", text)
         self._chat_queue = collections.deque()
 
+        # OCR パネル用: 結果キュー + 最終テキスト（コピー用）
+        self._ocr_result_queue = collections.deque()  # (text, is_final) tuples
+        self._ocr_final_text = ""
+
         # Telegram ポーラー（nanobot 停止中のみ動作）
         def _on_recv(text):
             self._chat_queue.append(("recv", text))
@@ -132,6 +150,7 @@ class AppDelegate(NSObject):
         self._setup_ufo_window()
         self._setup_log_panel()
         self._setup_message_panel()
+        self._setup_ocr_panel()
         self._setup_menu_bar()
         self._start_animation()
 
@@ -140,6 +159,9 @@ class AppDelegate(NSObject):
 
         # チャットキューを 0.5秒ごとにメインスレッドで処理
         self._add_timer("drainChatQueue:", 0.5, repeats=True)
+
+        # OCR 結果キューを 0.3秒ごとにメインスレッドで処理
+        self._add_timer("drainOCRQueue:", 0.3, repeats=True)
 
         # Telegram ポーリング開始（nanobot が起動したら一時停止する）
         self._tg_poller.start()
@@ -279,6 +301,7 @@ class AppDelegate(NSObject):
                 CGPointMake(self._pos_x + wobble_x, self._pos_y + wobble_y)
             )
             self._update_msg_panel_position()
+            self._update_ocr_panel_position()
 
         # メニューバーアイコンを 15tick（約0.5秒）ごとに更新
         self._icon_tick += 1
@@ -514,6 +537,7 @@ class AppDelegate(NSObject):
         self._msg_window.setFrameOrigin_(CGPointMake(mx, my))
 
     def _show_msg_panel(self):
+        self._hide_ocr_panel()  # OCR パネルと排他表示
         self._msg_panel_visible = True  # 先にセットしないと位置更新がスキップされる
         self._update_msg_panel_position()
         self._msg_window.orderFrontRegardless()
@@ -583,6 +607,239 @@ class AppDelegate(NSObject):
         """チャット履歴を全消去する。"""
         self._chat_messages.clear()
         self._refresh_chat_view()
+
+    # -----------------------------------------------------------------------
+    # OCR パネル（glm-ocr via Ollama）
+    # -----------------------------------------------------------------------
+
+    def _setup_ocr_panel(self):
+        """glm-ocr の結果を表示する半透明ダークパネルを生成する。初期は非表示。"""
+        self._ocr_panel_visible = False
+
+        self._ocr_window = KeyableWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+            CGRectMake(0, 0, OCR_PANEL_W, OCR_PANEL_H),
+            NSWindowStyleMaskBorderless,
+            NSBackingStoreBuffered,
+            False,
+        )
+        self._ocr_window.setOpaque_(False)
+        self._ocr_window.setBackgroundColor_(NSColor.clearColor())
+        self._ocr_window.setLevel_(25)
+        self._ocr_window.setCollectionBehavior_(
+            NSWindowCollectionBehaviorCanJoinAllSpaces
+            | NSWindowCollectionBehaviorStationary
+        )
+        self._ocr_window.setHasShadow_(False)
+
+        bg = NSView.alloc().initWithFrame_(CGRectMake(0, 0, OCR_PANEL_W, OCR_PANEL_H))
+        bg.setWantsLayer_(True)
+        bg.layer().setBackgroundColor_(
+            NSColor.colorWithSRGBRed_green_blue_alpha_(0.08, 0.08, 0.12, 0.92).CGColor()
+        )
+        bg.layer().setCornerRadius_(12.0)
+
+        # ボタン行（下部）
+        btn_w = (OCR_PANEL_W - OCR_PAD * 2 - 6) // 2
+        copy_btn = NSButton.alloc().initWithFrame_(
+            CGRectMake(OCR_PAD, OCR_PAD, btn_w, OCR_BTN_H)
+        )
+        copy_btn.setTitle_("コピー")
+        copy_btn.setBezelStyle_(1)
+        copy_btn.setAction_("copyOCRText:")
+        copy_btn.setTarget_(self)
+
+        close_btn = NSButton.alloc().initWithFrame_(
+            CGRectMake(OCR_PAD + btn_w + 6, OCR_PAD, btn_w, OCR_BTN_H)
+        )
+        close_btn.setTitle_("閉じる")
+        close_btn.setBezelStyle_(1)
+        close_btn.setAction_("closeOCRPanel:")
+        close_btn.setTarget_(self)
+
+        # テキスト表示エリア（上部）
+        text_y = OCR_PAD + OCR_BTN_H + OCR_PAD
+        text_h = OCR_PANEL_H - text_y - OCR_PAD
+        inner_w = OCR_PANEL_W - OCR_PAD * 2
+
+        scroll = NSScrollView.alloc().initWithFrame_(
+            CGRectMake(OCR_PAD, text_y, inner_w, text_h)
+        )
+        scroll.setHasVerticalScroller_(True)
+        scroll.setAutohidesScrollers_(True)
+        scroll.setBorderType_(0)
+        scroll.setDrawsBackground_(False)
+
+        self._ocr_text_view = NSTextView.alloc().initWithFrame_(
+            CGRectMake(0, 0, inner_w, text_h)
+        )
+        self._ocr_text_view.setEditable_(False)
+        self._ocr_text_view.setSelectable_(True)
+        self._ocr_text_view.setDrawsBackground_(False)
+        self._ocr_text_view.setVerticallyResizable_(True)
+        self._ocr_text_view.setHorizontallyResizable_(False)
+        self._ocr_text_view.textContainer().setWidthTracksTextView_(True)
+        self._ocr_text_view.setMinSize_((inner_w, text_h))
+        self._ocr_text_view.setMaxSize_((inner_w, 1e8))
+
+        scroll.setDocumentView_(self._ocr_text_view)
+        bg.addSubview_(scroll)
+        bg.addSubview_(copy_btn)
+        bg.addSubview_(close_btn)
+        self._ocr_window.contentView().addSubview_(bg)
+
+    def _show_ocr_panel(self):
+        self._hide_msg_panel()  # メッセージパネルと排他表示
+        self._ocr_panel_visible = True
+        self._update_ocr_panel_position()
+        self._ocr_window.orderFrontRegardless()
+
+    def _hide_ocr_panel(self):
+        self._ocr_window.orderOut_(None)
+        self._ocr_panel_visible = False
+
+    def _update_ocr_panel_position(self):
+        """UFO ウィンドウの直下に OCR パネルを配置する。"""
+        if not self._ocr_panel_visible:
+            return
+        frame = self._window.frame()
+        mx = frame.origin.x + (UFO_SIZE - OCR_PANEL_W) / 2
+        my = frame.origin.y - OCR_PANEL_H - 5
+        self._ocr_window.setFrameOrigin_(CGPointMake(mx, my))
+
+    def _refresh_ocr_view(self, text):
+        """OCR テキストビューをライトグレー等幅フォントで更新する。"""
+        font = NSFont.systemFontOfSize_(12)
+        color = NSColor.colorWithSRGBRed_green_blue_alpha_(0.9, 0.9, 0.9, 1.0)
+        attrs = {NSFontAttributeName: font, NSForegroundColorAttributeName: color}
+        self._ocr_text_view.textStorage().setAttributedString_(
+            NSAttributedString.alloc().initWithString_attributes_(text, attrs)
+        )
+        self._ocr_text_view.scrollRangeToVisible_((0, 0))
+
+    @objc.typedSelector(b"v@:@")
+    def drainOCRQueue_(self, timer):
+        """OCR 結果キューをメインスレッドで処理してパネルを更新する。"""
+        if not self._ocr_result_queue:
+            return
+        text, is_final = None, False
+        while self._ocr_result_queue:
+            try:
+                text, is_final = self._ocr_result_queue.popleft()
+            except IndexError:
+                break
+        if text is not None:
+            if is_final:
+                self._ocr_final_text = text
+            self._refresh_ocr_view(text)
+
+    @objc.typedSelector(b"v@:@")
+    def copyOCRText_(self, sender):
+        """OCR 結果をクリップボードにコピーする。"""
+        if not self._ocr_final_text:
+            return
+        pb = NSPasteboard.generalPasteboard()
+        pb.clearContents()
+        pb.setString_forType_(self._ocr_final_text, "public.utf8-plain-text")
+
+    @objc.typedSelector(b"v@:@")
+    def closeOCRPanel_(self, sender):
+        self._hide_ocr_panel()
+
+    @objc.typedSelector(b"v@:@")
+    def startOCR_(self, sender):
+        """ufocapture フォルダからファイルを選択して glm-ocr で OCR 解析する。"""
+        capture_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ufocapture")
+        os.makedirs(capture_dir, exist_ok=True)
+
+        panel = NSOpenPanel.openPanel()
+        panel.setCanChooseFiles_(True)
+        panel.setCanChooseDirectories_(False)
+        panel.setAllowsMultipleSelection_(False)
+        panel.setAllowedFileTypes_(["png", "jpg", "jpeg"])
+        panel.setTitle_("OCR する画像を選択")
+        panel.setDirectoryURL_(NSURL.fileURLWithPath_(capture_dir))
+
+        if panel.runModal() != 1:
+            return  # キャンセル
+
+        image_path = panel.URL().path()
+        self._ocr_final_text = ""
+        self._show_ocr_panel()
+        self._refresh_ocr_view("解析中...")
+
+        threading.Thread(
+            target=self._run_ocr,
+            args=(image_path,),
+            daemon=True,
+        ).start()
+
+    def _check_ollama_api(self):
+        """Ollama API (localhost:11434) に接続できるか確認する。"""
+        try:
+            urllib.request.urlopen("http://localhost:11434", timeout=2)
+            return True
+        except Exception:
+            return False
+
+    def _ensure_ollama_running(self):
+        """Ollama が起動していなければ起動して、最大15秒待つ。"""
+        if self._check_ollama_api():
+            return True
+        self._ocr_result_queue.append(("Ollama 起動中...", False))
+        try:
+            subprocess.Popen(
+                ["open", "-a", "Ollama"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            try:
+                subprocess.Popen(
+                    ["ollama", "serve"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception:
+                return False
+        for _ in range(15):
+            time.sleep(1)
+            if self._check_ollama_api():
+                return True
+        return False
+
+    def _run_ocr(self, image_path):
+        """バックグラウンドスレッドで Ollama glm-ocr を呼び出す。"""
+        if not self._ensure_ollama_running():
+            self._ocr_result_queue.append((
+                "Ollama に接続できませんでした。\nOllama が起動しているか確認してください。",
+                True,
+            ))
+            return
+
+        self._ocr_result_queue.append(("解析中...", False))
+        try:
+            with open(image_path, "rb") as f:
+                image_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+            payload = json.dumps({
+                "model": "glm-ocr",
+                "prompt": "この画像に含まれるすべてのテキストを読み取って書き起こしてください。",
+                "images": [image_b64],
+                "stream": False,
+            }).encode("utf-8")
+
+            req = urllib.request.Request(
+                "http://localhost:11434/api/generate",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+
+            text = result.get("response", "").strip() or "(テキストが見つかりませんでした)"
+            self._ocr_result_queue.append((text, True))
+        except Exception as e:
+            self._ocr_result_queue.append((f"エラー: {e}", True))
 
     # -----------------------------------------------------------------------
     # Telegram 送信
@@ -753,6 +1010,9 @@ class AppDelegate(NSObject):
 
         # メッセージパネル
         self._msg_panel_item = self._make_menu_item("メッセージ欄を表示", "toggleMsgPanel:", "m", menu)
+
+        # OCR 解析
+        self._make_menu_item("🔍 OCR 解析", "startOCR:", "o", menu)
 
         # チャットクリア
         self._make_menu_item("チャットをクリア", "clearChat:", "", menu)

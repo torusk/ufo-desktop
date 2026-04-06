@@ -25,9 +25,11 @@ def is_enabled():
 def enable():
     """
     Launch Agent を登録してログイン時自動起動を有効にする。
-    uv のパスを自動検出（見つからなければ /opt/homebrew/bin/uv にフォールバック）。
+    launchd の環境では uv run が動かないため、.venv の Python を直接使用する。
     """
-    uv = shutil.which("uv") or "/opt/homebrew/bin/uv"
+    _app_dir = os.path.dirname(_APP_SCRIPT)
+    python = os.path.join(_app_dir, ".venv", "bin", "python3")
+    log_dir = os.path.expanduser("~/Library/Logs")
     plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -37,22 +39,27 @@ def enable():
     <string>{LABEL}</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{uv}</string>
-        <string>run</string>
-        <string>python</string>
+        <string>{python}</string>
         <string>{_APP_SCRIPT}</string>
     </array>
+    <key>WorkingDirectory</key>
+    <string>{_app_dir}</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <false/>
     <key>ProcessType</key>
     <string>Interactive</string>
+    <key>StandardOutPath</key>
+    <string>{log_dir}/ufo_desktop.log</string>
+    <key>StandardErrorPath</key>
+    <string>{log_dir}/ufo_desktop_err.log</string>
 </dict>
 </plist>"""
     os.makedirs(os.path.dirname(PLIST_PATH), exist_ok=True)
     with open(PLIST_PATH, "w") as f:
         f.write(plist_content)
+    subprocess.run(["launchctl", "unload", PLIST_PATH], check=False)
     subprocess.run(["launchctl", "load", PLIST_PATH], check=False)
 
 

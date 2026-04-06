@@ -20,6 +20,7 @@ from AppKit import (
     NSApplication,
     NSApplicationActivationPolicyAccessory,
     NSAttributedString,
+    NSMutableAttributedString,
     NSBackingStoreBuffered,
     NSColor,
     NSEvent,
@@ -56,7 +57,9 @@ TELEGRAM_CONFIG_PATH = os.path.expanduser("~/.ufo_config.json")
 
 # --- Message panel ---
 MSG_PANEL_W = 230
-MSG_PANEL_H = 42
+MSG_PANEL_H = 170
+MSG_CHAT_H = 118   # チャット表示エリアの高さ
+MSG_INPUT_H = 28   # 入力フィールドの高さ
 
 # --- Display ---
 UFO_SIZE = 120
@@ -185,6 +188,10 @@ class AppDelegate(NSObject):
         self._nanobot_proc = None
         self._log_lines = []
         self._log_queue = collections.deque()
+        self._chat_messages = []       # list of ("sent"|"recv", text)
+        self._chat_queue = collections.deque()
+        self._tg_offset = 0
+        self._tg_poll_active = False
 
         self._setup_window()
         self._setup_log_panel()
@@ -197,6 +204,15 @@ class AppDelegate(NSObject):
             0.25, self, "drainLogQueue:", None, True
         )
         NSRunLoop.currentRunLoop().addTimer_forMode_(drain_timer, NSRunLoopCommonModes)
+
+        # チャットキュー drain タイマー
+        chat_drain = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
+            0.5, self, "drainChatQueue:", None, True
+        )
+        NSRunLoop.currentRunLoop().addTimer_forMode_(chat_drain, NSRunLoopCommonModes)
+
+        # Telegramポーリング開始（nanobot停止中のみ有効）
+        self._start_telegram_polling()
 
     # ------------------------------------------------------------------
     def _screen_bounds(self):
@@ -342,18 +358,47 @@ class AppDelegate(NSObject):
         bg.layer().setCornerRadius_(10.0)
 
         p = 7
-        field_h = MSG_PANEL_H - p * 2
+        gap = 5
+
+        # --- 入力フィールド（下部）---
         self._msg_field = NSTextField.alloc().initWithFrame_(
-            CGRectMake(p, p, MSG_PANEL_W - p * 2, field_h)
+            CGRectMake(p, p, MSG_PANEL_W - p * 2, MSG_INPUT_H)
         )
-        self._msg_field.setPlaceholderString_("Telegramへ送信... (Enter)")
+        self._msg_field.setPlaceholderString_("")
         self._msg_field.setBezeled_(False)
         self._msg_field.setDrawsBackground_(False)
         self._msg_field.setTextColor_(NSColor.darkGrayColor())
         self._msg_field.setFont_(NSFont.systemFontOfSize_(12))
+        self._msg_field.setFocusRingType_(1)  # NSFocusRingTypeNone
         self._msg_field.setAction_("sendTelegramMessage:")
         self._msg_field.setTarget_(self)
 
+        # --- チャット表示エリア（上部）---
+        chat_y = p + MSG_INPUT_H + gap
+        chat_w = MSG_PANEL_W - p * 2
+        scroll = NSScrollView.alloc().initWithFrame_(
+            CGRectMake(p, chat_y, chat_w, MSG_CHAT_H)
+        )
+        scroll.setHasVerticalScroller_(True)
+        scroll.setAutohidesScrollers_(True)
+        scroll.setBorderType_(0)
+        scroll.setDrawsBackground_(False)
+
+        self._chat_text = NSTextView.alloc().initWithFrame_(
+            CGRectMake(0, 0, chat_w, MSG_CHAT_H)
+        )
+        self._chat_text.setEditable_(False)
+        self._chat_text.setSelectable_(False)
+        self._chat_text.setDrawsBackground_(False)
+        self._chat_text.setVerticallyResizable_(True)
+        self._chat_text.setHorizontallyResizable_(False)
+        self._chat_text.textContainer().setWidthTracksTextView_(True)
+        self._chat_text.setMinSize_((chat_w, MSG_CHAT_H))
+        self._chat_text.setMaxSize_((chat_w, 1e8))
+        self._chat_font = NSFont.systemFontOfSize_(11)
+
+        scroll.setDocumentView_(self._chat_text)
+        bg.addSubview_(scroll)
         bg.addSubview_(self._msg_field)
         self._msg_window.contentView().addSubview_(bg)
 
@@ -402,6 +447,7 @@ class AppDelegate(NSObject):
             self._show_log_panel()
             return
         self._msg_field.setStringValue_("")
+        self._chat_queue.append(("sent", text))
         threading.Thread(
             target=self._send_telegram,
             args=(token, chat_id, text),
@@ -416,7 +462,6 @@ class AppDelegate(NSObject):
                 url, data=payload, headers={"Content-Type": "application/json"}
             )
             urllib.request.urlopen(req, timeout=10)
-            self._log_queue.append(f"[Telegram] 送信完了: {text[:60]}")
         except urllib.error.HTTPError as e:
             body = e.read().decode(errors="replace")
             self._log_queue.append(f"[Telegram] HTTPエラー {e.code}: {body[:120]}")
@@ -472,6 +517,73 @@ class AppDelegate(NSObject):
                 break
         if changed:
             self._refresh_log_view()
+
+    @objc.typedSelector(b"v@:@")
+    def drainChatQueue_(self, timer):
+        if not self._chat_queue:
+            return
+        while self._chat_queue:
+            try:
+                direction, text = self._chat_queue.popleft()
+                self._chat_messages.append((direction, text))
+            except IndexError:
+                break
+        self._refresh_chat_view()
+
+    def _refresh_chat_view(self):
+        combined = NSMutableAttributedString.alloc().init()
+        sent_color = NSColor.colorWithSRGBRed_green_blue_alpha_(0.25, 0.25, 0.25, 1.0)
+        recv_color = NSColor.colorWithSRGBRed_green_blue_alpha_(0.1, 0.35, 0.65, 1.0)
+        for direction, text in self._chat_messages:
+            color = sent_color if direction == "sent" else recv_color
+            prefix = "→ " if direction == "sent" else "← "
+            attrs = {NSFontAttributeName: self._chat_font, NSForegroundColorAttributeName: color}
+            part = NSAttributedString.alloc().initWithString_attributes_(
+                prefix + text + "\n", attrs
+            )
+            combined.appendAttributedString_(part)
+        self._chat_text.textStorage().setAttributedString_(combined)
+        self._chat_text.scrollRangeToVisible_((combined.length(), 0))
+
+    # ------------------------------------------------------------------
+    # Telegram ポーリング（nanobot停止中のみ動作）
+    # ------------------------------------------------------------------
+    def _start_telegram_polling(self):
+        if self._tg_poll_active:
+            return
+        self._tg_poll_active = True
+        threading.Thread(target=self._telegram_poll_loop, daemon=True).start()
+
+    def _stop_telegram_polling(self):
+        self._tg_poll_active = False
+
+    def _telegram_poll_loop(self):
+        while self._tg_poll_active:
+            config = self._load_telegram_config()
+            if config:
+                self._fetch_telegram_updates(config)
+            time.sleep(2)
+
+    def _fetch_telegram_updates(self, config):
+        token = config.get("telegram_token", "")
+        chat_id = str(config.get("telegram_chat_id", ""))
+        try:
+            url = (
+                f"https://api.telegram.org/bot{token}/getUpdates"
+                f"?offset={self._tg_offset}&timeout=1&limit=10"
+            )
+            req = urllib.request.Request(url)
+            resp = urllib.request.urlopen(req, timeout=6)
+            data = json.loads(resp.read())
+            for update in data.get("result", []):
+                self._tg_offset = update["update_id"] + 1
+                msg = update.get("message", {})
+                if str(msg.get("chat", {}).get("id", "")) == chat_id:
+                    text = msg.get("text", "")
+                    if text:
+                        self._chat_queue.append(("recv", text))
+        except Exception:
+            pass
 
     def _refresh_log_view(self):
         text = "\n".join(self._log_lines)
@@ -570,6 +682,7 @@ class AppDelegate(NSObject):
     def _start_nanobot(self):
         if self._is_nanobot_running():
             return
+        self._stop_telegram_polling()  # nanobotがgetUpdatesを使うため停止
         # ログをクリアして表示
         self._log_lines.clear()
         self._log_queue.clear()
@@ -616,6 +729,7 @@ class AppDelegate(NSObject):
         self._nanobot_proc = None
         self._nanobot_item.setTitle_("nanobot 起動")
         self._update_menu_bar_icon()
+        self._start_telegram_polling()  # nanobot停止後にポーリング再開
 
     # ------------------------------------------------------------------
     # Log panel visibility

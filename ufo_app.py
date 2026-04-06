@@ -420,15 +420,36 @@ class AppDelegate(NSObject):
             self._log_queue.append(f"[Telegram] 送信エラー: {e}")
 
     def _load_telegram_config(self):
+        # 1. 環境変数
         token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
         chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
         if token and chat_id:
             return {"telegram_token": token, "telegram_chat_id": chat_id}
+
+        # 2. ~/.ufo_config.json (独自設定)
         try:
             with open(TELEGRAM_CONFIG_PATH) as f:
-                return json.load(f)
+                cfg = json.load(f)
+            if cfg.get("telegram_token") and cfg.get("telegram_chat_id"):
+                return cfg
         except Exception:
-            return None
+            pass
+
+        # 3. ~/.nanobot/config.json (nanobotの設定を流用)
+        try:
+            nanobot_cfg_path = os.path.expanduser("~/.nanobot/config.json")
+            with open(nanobot_cfg_path) as f:
+                nb = json.load(f)
+            tg = nb.get("channels", {}).get("telegram", {})
+            token = tg.get("token", "")
+            allow_from = tg.get("allowFrom", [])
+            chat_id = str(allow_from[0]) if allow_from else ""
+            if token and chat_id:
+                return {"telegram_token": token, "telegram_chat_id": chat_id}
+        except Exception:
+            pass
+
+        return None
 
     # ------------------------------------------------------------------
     @objc.typedSelector(b"v@:@")

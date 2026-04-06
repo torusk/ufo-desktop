@@ -50,6 +50,7 @@ from AppKit import (
 from Quartz import CGPointMake, CGRectMake
 
 import autostart
+import icons
 import telegram as tg
 from views import ClickableView, KeyableWindow, LogPanelView
 
@@ -102,9 +103,16 @@ class AppDelegate(NSObject):
         # --- 状態変数の初期化 ---
         self._nanobot_proc = None
 
+        # ドット絵アイコンを生成・ロード
+        icons.generate_all()
+        self._load_menu_icons()
+
         # メニューバーアイコンのアニメーション用カウンター
         self._icon_tick = 0
-        self._chat_flash_ticks = 0  # >0 の間 💬🛸 を表示
+        self._chat_flash_ticks = 0  # >0 の間チャットアイコンを表示
+
+        # UFO 非表示フラグ
+        self._ufo_hidden = False
 
         # ログパネル用: 行リスト + スレッド間受け渡しキュー
         self._log_lines = []
@@ -135,6 +143,26 @@ class AppDelegate(NSObject):
 
         # Telegram ポーリング開始（nanobot が起動したら一時停止する）
         self._tg_poller.start()
+
+    # -----------------------------------------------------------------------
+    # ドット絵アイコン
+    # -----------------------------------------------------------------------
+
+    def _load_menu_icons(self):
+        """assets/ のドット絵 PNG を NSImage としてロードする。"""
+        def _load(name):
+            path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "assets", name
+            )
+            img = NSImage.alloc().initWithContentsOfFile_(path)
+            img.setSize_((18, 18))
+            img.setTemplate_(True)
+            return img
+
+        self._icon_idle     = _load("mb_idle.png")
+        self._icon_active_a = _load("mb_active_a.png")
+        self._icon_active_b = _load("mb_active_b.png")
+        self._icon_chat     = _load("mb_chat.png")
 
     # -----------------------------------------------------------------------
     # ユーティリティ
@@ -232,24 +260,25 @@ class AppDelegate(NSObject):
         """60fps で呼ばれるアニメーションループ。移動 + wobble + パネル追従。"""
         t = time.monotonic() - self._start_time
 
-        # ウェイポイントへ向かって直進
-        dx = self._target_x - self._pos_x
-        dy = self._target_y - self._pos_y
-        dist = math.hypot(dx, dy)
-        if dist < ARRIVE_THRESHOLD:
-            self._target_x, self._target_y = self._random_waypoint()
-        else:
-            self._pos_x += (dx / dist) * ROAM_SPEED
-            self._pos_y += (dy / dist) * ROAM_SPEED
+        if not self._ufo_hidden:
+            # ウェイポイントへ向かって直進
+            dx = self._target_x - self._pos_x
+            dy = self._target_y - self._pos_y
+            dist = math.hypot(dx, dy)
+            if dist < ARRIVE_THRESHOLD:
+                self._target_x, self._target_y = self._random_waypoint()
+            else:
+                self._pos_x += (dx / dist) * ROAM_SPEED
+                self._pos_y += (dy / dist) * ROAM_SPEED
 
-        # サイン波でふわふわ揺らす
-        wobble_y = WOBBLE_Y_AMP * math.sin(2.0 * math.pi * t / WOBBLE_PERIOD)
-        wobble_x = WOBBLE_X_AMP * math.sin(2.0 * math.pi * t / (WOBBLE_PERIOD * 1.6))
+            # サイン波でふわふわ揺らす
+            wobble_y = WOBBLE_Y_AMP * math.sin(2.0 * math.pi * t / WOBBLE_PERIOD)
+            wobble_x = WOBBLE_X_AMP * math.sin(2.0 * math.pi * t / (WOBBLE_PERIOD * 1.6))
 
-        self._window.setFrameOrigin_(
-            CGPointMake(self._pos_x + wobble_x, self._pos_y + wobble_y)
-        )
-        self._update_msg_panel_position()
+            self._window.setFrameOrigin_(
+                CGPointMake(self._pos_x + wobble_x, self._pos_y + wobble_y)
+            )
+            self._update_msg_panel_position()
 
         # メニューバーアイコンを 15tick（約0.5秒）ごとに更新
         self._icon_tick += 1
@@ -272,6 +301,18 @@ class AppDelegate(NSObject):
     @objc.typedSelector(b"v@:@")
     def toggleUFO_(self, sender):
         self.toggleAnimation()
+
+    @objc.typedSelector(b"v@:@")
+    def toggleHide_(self, sender):
+        """UFO ウィンドウの表示/非表示を切り替える。"""
+        if self._ufo_hidden:
+            self._window.orderFrontRegardless()
+            self._ufo_hidden = False
+            self._hide_item.setTitle_("UFO を隠す")
+        else:
+            self._window.orderOut_(None)
+            self._ufo_hidden = True
+            self._hide_item.setTitle_("UFO を表示")
 
     # -----------------------------------------------------------------------
     # ログパネル
@@ -700,8 +741,8 @@ class AppDelegate(NSObject):
 
         menu = NSMenu.alloc().init()
 
-        # UFO アニメーション起動/停止
-        self._toggle_item = self._make_menu_item("UFO 停止", "toggleUFO:", "u", menu)
+        # UFO 表示/非表示
+        self._hide_item = self._make_menu_item("UFO を隠す", "toggleHide:", "u", menu)
         menu.addItem_(NSMenuItem.separatorItem())
 
         # nanobot ゲートウェイ
@@ -729,9 +770,6 @@ class AppDelegate(NSObject):
 
         menu.addItem_(NSMenuItem.separatorItem())
 
-        # 終了
-        self._make_menu_item("終了", "quitApp:", "q", menu)
-
         self._status_item.setMenu_(menu)
 
     def _make_menu_item(self, title, action, key, menu):
@@ -742,15 +780,16 @@ class AppDelegate(NSObject):
         return item
 
     def _update_menu_bar_icon(self):
-        """稼働状態に合わせてメニューバーアイコンを更新する。"""
+        """稼働状態に合わせてメニューバーのドット絵アイコンを更新する。"""
         if self._chat_flash_ticks > 0:
-            icon = "💬🛸"
+            img = self._icon_chat
         elif self._is_nanobot_running():
-            # 交互に電撃アニメーション
-            icon = "⚡🛸" if (self._icon_tick // 15) % 2 == 0 else "🛸⚡"
+            img = self._icon_active_a if (self._icon_tick // 15) % 2 == 0 else self._icon_active_b
         else:
-            icon = "🛸"
-        self._status_item.button().setTitle_(icon)
+            img = self._icon_idle
+        btn = self._status_item.button()
+        btn.setTitle_("")
+        btn.setImage_(img)
 
     # -----------------------------------------------------------------------
     # アプリ終了

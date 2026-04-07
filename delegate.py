@@ -575,6 +575,7 @@ class AppDelegate(NSObject):
 
     def _show_msg_panel(self):
         self._msg_panel_visible = True
+        self._update_chat_mode()
         NSApp.activateIgnoringOtherApps_(True)
         self._msg_window.makeKeyAndOrderFront_(None)
         self._msg_window.makeFirstResponder_(self._msg_field)
@@ -628,43 +629,82 @@ class AppDelegate(NSObject):
     def _refresh_chat_view(self):
         """
         チャット履歴を LINE 風に再描画する。
-        送信: 右寄せ・グレー背景
-        受信: 左寄せ・水色背景
+        送信: 右寄せ (alignment=1)・グレー背景
+        受信: 左寄せ (alignment=0)・水色 or 緑背景（nanobot）
         """
-        combined = NSMutableAttributedString.alloc().init()
-        sent_fg = NSColor.colorWithSRGBRed_green_blue_alpha_(0.1,  0.1,  0.1,  1.0)
-        recv_fg = NSColor.colorWithSRGBRed_green_blue_alpha_(0.05, 0.25, 0.55, 1.0)
-        sent_bg = NSColor.colorWithSRGBRed_green_blue_alpha_(0.80, 0.80, 0.80, 0.75)
-        recv_bg = NSColor.colorWithSRGBRed_green_blue_alpha_(0.72, 0.88, 1.0,  0.85)
-        spacer_attrs = {NSFontAttributeName: NSFont.systemFontOfSize_(4)}
+        try:
+            combined = NSMutableAttributedString.alloc().init()
+            sent_fg   = NSColor.colorWithSRGBRed_green_blue_alpha_(0.1,  0.1,  0.1,  1.0)
+            recv_fg   = NSColor.colorWithSRGBRed_green_blue_alpha_(0.05, 0.25, 0.55, 1.0)
+            bot_fg    = NSColor.colorWithSRGBRed_green_blue_alpha_(0.05, 0.40, 0.15, 1.0)
+            sent_bg   = NSColor.colorWithSRGBRed_green_blue_alpha_(0.80, 0.80, 0.80, 0.80)
+            recv_bg   = NSColor.colorWithSRGBRed_green_blue_alpha_(0.72, 0.88, 1.0,  0.85)
+            bot_bg    = NSColor.colorWithSRGBRed_green_blue_alpha_(0.82, 0.95, 0.82, 0.85)
+            sys_fg    = NSColor.colorWithSRGBRed_green_blue_alpha_(0.5,  0.5,  0.5,  1.0)
+            spacer_attrs = {NSFontAttributeName: NSFont.systemFontOfSize_(4)}
 
-        for direction, text in self._chat_messages:
-            fg  = sent_fg if direction == "sent" else recv_fg
-            bg  = sent_bg if direction == "sent" else recv_bg
+            for direction, text in self._chat_messages:
+                is_bot = direction == "recv" and text.startswith("🤖")
+                is_sys = direction == "sys"
 
-            para = NSMutableParagraphStyle.alloc().init()
-            if direction == "sent":
-                para.setAlignment_(2)   # NSTextAlignmentRight
-                para.setHeadIndent_(40)
-            else:
-                para.setAlignment_(0)   # NSTextAlignmentLeft
-                para.setTailIndent_(-40)
+                if is_sys:
+                    para = NSMutableParagraphStyle.alloc().init()
+                    para.setAlignment_(2)   # center
+                    attrs = {
+                        NSFontAttributeName:            NSFont.systemFontOfSize_(10),
+                        NSForegroundColorAttributeName: sys_fg,
+                        NSParagraphStyleAttributeName:  para,
+                    }
+                elif direction == "sent":
+                    para = NSMutableParagraphStyle.alloc().init()
+                    para.setAlignment_(1)   # right (NSTextAlignmentRight = 1)
+                    para.setHeadIndent_(50)
+                    attrs = {
+                        NSFontAttributeName:            self._chat_font,
+                        NSForegroundColorAttributeName: sent_fg,
+                        NSBackgroundColorAttributeName: sent_bg,
+                        NSParagraphStyleAttributeName:  para,
+                    }
+                else:
+                    para = NSMutableParagraphStyle.alloc().init()
+                    para.setAlignment_(0)   # left
+                    para.setTailIndent_(-50)
+                    fg = bot_fg if is_bot else recv_fg
+                    bg = bot_bg if is_bot else recv_bg
+                    attrs = {
+                        NSFontAttributeName:            self._chat_font,
+                        NSForegroundColorAttributeName: fg,
+                        NSBackgroundColorAttributeName: bg,
+                        NSParagraphStyleAttributeName:  para,
+                    }
 
-            attrs = {
-                NSFontAttributeName:            self._chat_font,
-                NSForegroundColorAttributeName: fg,
-                NSBackgroundColorAttributeName: bg,
-                NSParagraphStyleAttributeName:  para,
-            }
-            combined.appendAttributedString_(
-                NSAttributedString.alloc().initWithString_attributes_(text + "\n", attrs)
+                combined.appendAttributedString_(
+                    NSAttributedString.alloc().initWithString_attributes_(text + "\n", attrs)
+                )
+                combined.appendAttributedString_(
+                    NSAttributedString.alloc().initWithString_attributes_("\n", spacer_attrs)
+                )
+
+            self._chat_text.textStorage().setAttributedString_(combined)
+            self._chat_text.scrollRangeToVisible_((combined.length(), 0))
+        except Exception as e:
+            # 段落スタイル失敗時のフォールバック（プレーンテキスト表示）
+            lines = []
+            for direction, text in self._chat_messages:
+                if direction == "sent":
+                    lines.append(f"→ {text}")
+                elif direction == "sys":
+                    lines.append(f"— {text} —")
+                else:
+                    lines.append(f"← {text}")
+            plain = "\n".join(lines)
+            font  = NSFont.systemFontOfSize_(12)
+            color = NSColor.darkGrayColor()
+            self._chat_text.textStorage().setAttributedString_(
+                NSAttributedString.alloc().initWithString_attributes_(
+                    plain, {NSFontAttributeName: font, NSForegroundColorAttributeName: color}
+                )
             )
-            combined.appendAttributedString_(
-                NSAttributedString.alloc().initWithString_attributes_("\n", spacer_attrs)
-            )
-
-        self._chat_text.textStorage().setAttributedString_(combined)
-        self._chat_text.scrollRangeToVisible_((combined.length(), 0))
 
     @objc.typedSelector(b"v@:@")
     def clearChat_(self, sender):
@@ -1367,6 +1407,8 @@ class AppDelegate(NSObject):
 
         self._nanobot_item.setTitle_("🐈 nanobot停止")
         self._update_menu_bar_icon()
+        self._chat_queue.append(("sys", "🤖 nanobot 起動 — AI が返答します"))
+        self._update_chat_mode()
 
     def _stop_nanobot(self):
         if not self._is_nanobot_running():
@@ -1382,6 +1424,20 @@ class AppDelegate(NSObject):
 
         # nanobot 停止後に UFO 側のポーリングを再開
         self._tg_poller.start()
+        self._chat_queue.append(("sys", "📱 nanobot 停止 — Telegram 受信に切り替えました"))
+        self._update_chat_mode()
+
+    def _update_chat_mode(self):
+        """nanobot の稼働状態に合わせてチャットパネルの外観とプレースホルダーを更新する。"""
+        if not hasattr(self, "_msg_bg"):
+            return
+        if self._is_nanobot_running():
+            color = NSColor.colorWithSRGBRed_green_blue_alpha_(0.92, 0.97, 0.93, 0.97).CGColor()
+            self._msg_field.setPlaceholderString_("🤖 nanobot起動中 — AI が返答します")
+        else:
+            color = NSColor.colorWithSRGBRed_green_blue_alpha_(0.96, 0.96, 0.97, 0.96).CGColor()
+            self._msg_field.setPlaceholderString_("Telegramへ送信… (Enter)")
+        self._msg_bg.layer().setBackgroundColor_(color)
 
     def _read_nanobot_output(self, proc):
         """nanobot の stdout をバックグラウンドで読み続けてチャットキューに積む。"""

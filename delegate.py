@@ -103,6 +103,15 @@ OCR_PANEL_H = 270   # 翻訳ボタン行分を追加
 OCR_PAD = 8
 OCR_BTN_H = 28
 
+# ショートカット登録パネルのサイズ
+LAUNCHER_PANEL_W = 360
+LAUNCHER_PANEL_H = 260
+LAUNCHER_PAD = 8
+LAUNCHER_ROW_H = 26
+
+# 設定ファイルパス
+CONFIG_PATH = os.path.expanduser("~/.ufo_config.json")
+
 
 # ---------------------------------------------------------------------------
 # AppDelegate
@@ -141,6 +150,10 @@ class AppDelegate(NSObject):
         self._ocr_final_text = ""
         self._ocr_original_text = ""  # 翻訳元として保持（再翻訳時に使用）
 
+        # ショートカット登録パネル用
+        self._launchers = self._load_launchers()
+        self._launcher_dynamic_items = []
+
         # Telegram ポーラー（nanobot 停止中のみ動作）
         def _on_recv(text):
             self._chat_queue.append(("recv", text))
@@ -152,6 +165,7 @@ class AppDelegate(NSObject):
         self._setup_log_panel()
         self._setup_message_panel()
         self._setup_ocr_panel()
+        self._setup_launcher_panel()
         self._setup_menu_bar()
         self._start_animation()
 
@@ -303,6 +317,7 @@ class AppDelegate(NSObject):
             )
             self._update_msg_panel_position()
             self._update_ocr_panel_position()
+            self._update_launcher_panel_position()
 
         # メニューバーアイコンを 15tick（約0.5秒）ごとに更新
         self._icon_tick += 1
@@ -538,7 +553,8 @@ class AppDelegate(NSObject):
         self._msg_window.setFrameOrigin_(CGPointMake(mx, my))
 
     def _show_msg_panel(self):
-        self._hide_ocr_panel()  # OCR パネルと排他表示
+        self._hide_ocr_panel()
+        self._hide_launcher_panel()
         self._msg_panel_visible = True  # 先にセットしないと位置更新がスキップされる
         self._update_msg_panel_position()
         self._msg_window.orderFrontRegardless()
@@ -705,7 +721,8 @@ class AppDelegate(NSObject):
         self._ocr_window.contentView().addSubview_(bg)
 
     def _show_ocr_panel(self):
-        self._hide_msg_panel()  # メッセージパネルと排他表示
+        self._hide_msg_panel()
+        self._hide_launcher_panel()
         self._ocr_panel_visible = True
         self._update_ocr_panel_position()
         self._ocr_window.orderFrontRegardless()
@@ -762,6 +779,255 @@ class AppDelegate(NSObject):
     @objc.typedSelector(b"v@:@")
     def closeOCRPanel_(self, sender):
         self._hide_ocr_panel()
+
+    # -----------------------------------------------------------------------
+    # ショートカット登録パネル
+    # -----------------------------------------------------------------------
+
+    def _load_launchers(self):
+        """~/.ufo_config.json から launchers リストを読み込む。"""
+        try:
+            with open(CONFIG_PATH) as f:
+                data = json.load(f)
+            return [
+                {"label": str(e.get("label", "")), "url": str(e.get("url", ""))}
+                for e in data.get("launchers", [])
+                if e.get("label") and e.get("url")
+            ]
+        except Exception:
+            return []
+
+    def _save_launchers(self):
+        """launchers リストを ~/.ufo_config.json に保存する。"""
+        try:
+            try:
+                with open(CONFIG_PATH) as f:
+                    data = json.load(f)
+            except Exception:
+                data = {}
+            data["launchers"] = self._launchers
+            with open(CONFIG_PATH, "w") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self._log_queue.append(f"[Launcher] 保存エラー: {e}")
+
+    def _setup_launcher_panel(self):
+        """ショートカット登録パネルを生成する。初期は非表示。"""
+        self._launcher_panel_visible = False
+
+        self._launcher_window = KeyableWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+            CGRectMake(0, 0, LAUNCHER_PANEL_W, LAUNCHER_PANEL_H),
+            NSWindowStyleMaskBorderless,
+            NSBackingStoreBuffered,
+            False,
+        )
+        self._launcher_window.setOpaque_(False)
+        self._launcher_window.setBackgroundColor_(NSColor.clearColor())
+        self._launcher_window.setLevel_(25)
+        self._launcher_window.setCollectionBehavior_(
+            NSWindowCollectionBehaviorCanJoinAllSpaces
+            | NSWindowCollectionBehaviorStationary
+        )
+        self._launcher_window.setHasShadow_(False)
+
+        self._launcher_bg = NSView.alloc().initWithFrame_(
+            CGRectMake(0, 0, LAUNCHER_PANEL_W, LAUNCHER_PANEL_H)
+        )
+        self._launcher_bg.setWantsLayer_(True)
+        self._launcher_bg.layer().setBackgroundColor_(
+            NSColor.colorWithSRGBRed_green_blue_alpha_(0.08, 0.08, 0.12, 0.92).CGColor()
+        )
+        self._launcher_bg.layer().setCornerRadius_(12.0)
+
+        inner_w = LAUNCHER_PANEL_W - LAUNCHER_PAD * 2
+
+        # 閉じるボタン（最下部）
+        close_btn = NSButton.alloc().initWithFrame_(
+            CGRectMake(LAUNCHER_PANEL_W - LAUNCHER_PAD - 80, LAUNCHER_PAD, 80, 26)
+        )
+        close_btn.setTitle_("閉じる")
+        close_btn.setBezelStyle_(1)
+        close_btn.setAction_("closeLauncherPanel:")
+        close_btn.setTarget_(self)
+        self._launcher_bg.addSubview_(close_btn)
+
+        # 入力行（閉じるの上）
+        input_y = LAUNCHER_PAD + 26 + 6
+        add_w = 50
+        label_w = 80
+        url_w = inner_w - label_w - add_w - 8
+
+        self._launcher_label_field = NSTextField.alloc().initWithFrame_(
+            CGRectMake(LAUNCHER_PAD, input_y, label_w, 26)
+        )
+        self._launcher_label_field.setPlaceholderString_("名前")
+        self._launcher_label_field.setBezeled_(True)
+        self._launcher_label_field.setDrawsBackground_(True)
+        self._launcher_bg.addSubview_(self._launcher_label_field)
+
+        self._launcher_url_field = NSTextField.alloc().initWithFrame_(
+            CGRectMake(LAUNCHER_PAD + label_w + 4, input_y, url_w, 26)
+        )
+        self._launcher_url_field.setPlaceholderString_("https://...")
+        self._launcher_url_field.setBezeled_(True)
+        self._launcher_url_field.setDrawsBackground_(True)
+        self._launcher_bg.addSubview_(self._launcher_url_field)
+
+        add_btn = NSButton.alloc().initWithFrame_(
+            CGRectMake(LAUNCHER_PAD + label_w + 4 + url_w + 4, input_y, add_w, 26)
+        )
+        add_btn.setTitle_("追加")
+        add_btn.setBezelStyle_(1)
+        add_btn.setAction_("addLauncher:")
+        add_btn.setTarget_(self)
+        self._launcher_bg.addSubview_(add_btn)
+
+        # リスト表示エリア（スクロール）
+        list_y = input_y + 26 + LAUNCHER_PAD
+        list_h = LAUNCHER_PANEL_H - list_y - LAUNCHER_PAD
+
+        self._launcher_scroll = NSScrollView.alloc().initWithFrame_(
+            CGRectMake(LAUNCHER_PAD, list_y, inner_w, list_h)
+        )
+        self._launcher_scroll.setHasVerticalScroller_(True)
+        self._launcher_scroll.setAutohidesScrollers_(True)
+        self._launcher_scroll.setBorderType_(0)
+        self._launcher_scroll.setDrawsBackground_(False)
+        self._launcher_bg.addSubview_(self._launcher_scroll)
+
+        self._launcher_window.contentView().addSubview_(self._launcher_bg)
+        self._rebuild_launcher_list_view()
+
+    def _rebuild_launcher_list_view(self):
+        """ショートカット一覧を再描画する。"""
+        inner_w = LAUNCHER_PANEL_W - LAUNCHER_PAD * 2
+        gap = 4
+        n = len(self._launchers)
+        content_h = max(n * (LAUNCHER_ROW_H + gap), 40)
+
+        content_view = NSView.alloc().initWithFrame_(CGRectMake(0, 0, inner_w, content_h))
+
+        for i, entry in enumerate(self._launchers):
+            # y=0 が下端なので上から順に並べるため逆算
+            row_y = content_h - (i + 1) * (LAUNCHER_ROW_H + gap)
+
+            del_btn = NSButton.alloc().initWithFrame_(
+                CGRectMake(inner_w - 26, row_y + 2, 22, 22)
+            )
+            del_btn.setTitle_("×")
+            del_btn.setBezelStyle_(1)
+            del_btn.setTag_(i)
+            del_btn.setAction_("deleteLauncherByTag:")
+            del_btn.setTarget_(self)
+            content_view.addSubview_(del_btn)
+
+            label_field = NSTextField.alloc().initWithFrame_(
+                CGRectMake(0, row_y, 95, LAUNCHER_ROW_H)
+            )
+            label_field.setStringValue_(entry["label"])
+            label_field.setEditable_(False)
+            label_field.setBezeled_(False)
+            label_field.setDrawsBackground_(False)
+            label_field.setTextColor_(
+                NSColor.colorWithSRGBRed_green_blue_alpha_(0.9, 0.9, 0.9, 1.0)
+            )
+            label_field.setFont_(NSFont.systemFontOfSize_(12))
+            content_view.addSubview_(label_field)
+
+            url_field = NSTextField.alloc().initWithFrame_(
+                CGRectMake(99, row_y, inner_w - 99 - 30, LAUNCHER_ROW_H)
+            )
+            url_field.setStringValue_(entry["url"])
+            url_field.setEditable_(False)
+            url_field.setBezeled_(False)
+            url_field.setDrawsBackground_(False)
+            url_field.setTextColor_(
+                NSColor.colorWithSRGBRed_green_blue_alpha_(0.55, 0.65, 0.95, 1.0)
+            )
+            url_field.setFont_(NSFont.systemFontOfSize_(11))
+            content_view.addSubview_(url_field)
+
+        self._launcher_scroll.setDocumentView_(content_view)
+
+    def _rebuild_launcher_menu(self):
+        """メニューの動的ランチャーアイテムを再構築する。"""
+        menu = self._status_item.menu()
+        for item in self._launcher_dynamic_items:
+            menu.removeItem_(item)
+        self._launcher_dynamic_items = []
+
+        base_idx = menu.indexOfItem_(self._launcher_register_item) + 1
+        for i, entry in enumerate(self._launchers):
+            item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                f"🔗 {entry['label']}", "openLauncherURL:", ""
+            )
+            item.setTarget_(self)
+            item.setRepresentedObject_(entry["url"])
+            menu.insertItem_atIndex_(item, base_idx + i)
+            self._launcher_dynamic_items.append(item)
+
+    def _show_launcher_panel(self):
+        self._hide_msg_panel()
+        self._hide_ocr_panel()
+        self._launcher_panel_visible = True
+        self._update_launcher_panel_position()
+        self._launcher_window.orderFrontRegardless()
+
+    def _hide_launcher_panel(self):
+        if not hasattr(self, "_launcher_panel_visible"):
+            return
+        self._launcher_window.orderOut_(None)
+        self._launcher_panel_visible = False
+
+    def _update_launcher_panel_position(self):
+        """UFO ウィンドウの直下にランチャーパネルを配置する。"""
+        if not self._launcher_panel_visible:
+            return
+        frame = self._window.frame()
+        mx = frame.origin.x + (UFO_SIZE - LAUNCHER_PANEL_W) / 2
+        my = frame.origin.y - LAUNCHER_PANEL_H - 5
+        self._launcher_window.setFrameOrigin_(CGPointMake(mx, my))
+
+    @objc.typedSelector(b"v@:@")
+    def showLauncherPanel_(self, sender):
+        if self._launcher_panel_visible:
+            self._hide_launcher_panel()
+        else:
+            self._show_launcher_panel()
+
+    @objc.typedSelector(b"v@:@")
+    def closeLauncherPanel_(self, sender):
+        self._hide_launcher_panel()
+
+    @objc.typedSelector(b"v@:@")
+    def addLauncher_(self, sender):
+        label = self._launcher_label_field.stringValue().strip()
+        url = self._launcher_url_field.stringValue().strip()
+        if not label or not url:
+            return
+        if not url.startswith("http://") and not url.startswith("https://"):
+            url = "https://" + url
+        self._launchers.append({"label": label, "url": url})
+        self._save_launchers()
+        self._launcher_label_field.setStringValue_("")
+        self._launcher_url_field.setStringValue_("")
+        self._rebuild_launcher_list_view()
+        self._rebuild_launcher_menu()
+
+    @objc.typedSelector(b"v@:@")
+    def deleteLauncherByTag_(self, sender):
+        idx = sender.tag()
+        if 0 <= idx < len(self._launchers):
+            self._launchers.pop(idx)
+            self._save_launchers()
+            self._rebuild_launcher_list_view()
+            self._rebuild_launcher_menu()
+
+    @objc.typedSelector(b"v@:@")
+    def openLauncherURL_(self, sender):
+        url = sender.representedObject()
+        if url:
+            subprocess.Popen(["open", url])
 
     # 翻訳ボタン（translategemma:4b）
     @objc.typedSelector(b"v@:@")
@@ -1104,6 +1370,15 @@ class AppDelegate(NSObject):
 
         # NFT 作成
         self._make_menu_item("🎖️ NFT作成", "openNFTPages:", "", menu)
+
+        menu.addItem_(NSMenuItem.separatorItem())
+
+        # ショートカット登録
+        self._launcher_register_item = self._make_menu_item(
+            "✏️ ショートカット登録", "showLauncherPanel:", "", menu
+        )
+        # 登録済みランチャー（動的）をここに挿入
+        self._rebuild_launcher_menu()
 
         # ログパネル
         self._log_panel_item = self._make_menu_item("📝 ログ表示", "toggleLogPanel:", "l", menu)

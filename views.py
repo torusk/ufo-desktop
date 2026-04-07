@@ -58,17 +58,22 @@ class LogPanelView(NSView):
 
 class ClickableView(NSView):
     """
-    UFO 画像の上に重ねるイベント受け取りビュー。
+    UFO 画像の上に重ねる透明なイベント受け取りビュー。
 
-    シングルクリック → アニメーション浮遊トグル（0.3秒待機でダブルと区別）
-    ダブルクリック   → スクリーンショット撮影（screencapture -i -s）
-    右クリック       → コンテキストメニュー表示
-    停止中ドラッグ   → UFO とメッセージパネルを移動
+    操作とアクション:
+      シングルクリック → 0.3秒タイマーで待機 → toggleAnimation()（浮遊トグル）
+      ダブルクリック   → タイマーをキャンセル → screencapture -i -s（矩形選択スクショ）
+      右クリック       → メニューバーと同じメニューをコンテキストメニューとして表示
+      停止中ドラッグ   → UFO ウィンドウを移動（浮遊中は移動不可）
+
+    シングル/ダブルの判定:
+      mouseDown_ でシングル用 NSTimer を仕掛け、0.3秒以内に 2 回目が来たら
+      タイマーをキャンセルしてダブルクリック処理を実行する。
     """
 
     # クラス変数（全インスタンス共有）
-    _last_screenshot = 0.0  # 連続スクショ防止用タイムスタンプ
-    _pending_timer = None   # シングル/ダブルクリック判定タイマー
+    _last_screenshot = 0.0  # 連続スクショ防止用タイムスタンプ（2秒以内の連打を無視）
+    _pending_timer = None   # シングルクリック用の待機タイマー
 
     def acceptsFirstMouse_(self, event):
         return True
@@ -143,8 +148,19 @@ class ClickableView(NSView):
 
 class ResizeHandleView(NSView):
     """
-    メッセージパネル左下に配置するリサイズハンドル。
-    ドラッグで右上コーナーを固定したままウィンドウを拡縮する。
+    メッセージパネルの左下コーナーに配置するリサイズハンドル。
+
+    ドラッグすると右上コーナーを固定したままウィンドウを拡縮する。
+    ドラッグ量に応じて AppDelegate.resize_msg_panel() を呼び出し、
+    サブビューの frame とフォントサイズを再計算させる。
+
+    座標計算:
+      マウス開始位置と現在位置の差分 (dx, dy) を使って
+      「右上 = 固定」の制約でウィンドウの新しい origin とサイズを求める:
+        new_w = max(220, 右上x - (元左端x + dx))
+        new_h = max(200, 右上y - (元下端y + dy))
+        new_x = 右上x - new_w
+        new_y = 右上y - new_h
     """
 
     def acceptsFirstMouse_(self, event):

@@ -87,12 +87,6 @@ WOBBLE_PERIOD = 2.8    # 周期(秒)
 # アニメーションタイマー間隔（30fps）
 TIMER_INTERVAL = 1.0 / 30.0
 
-# ログパネルのサイズ
-LOG_PANEL_W = 460
-LOG_PANEL_H = 220
-LOG_PANEL_PADDING = 10
-LOG_MAX_LINES = 150      # これを超えたら古い行を捨てる
-
 # メッセージパネルのサイズ（固定・ドラッグ可能、UFO 非連動）
 MSG_PANEL_W = 280
 MSG_PANEL_H = 320
@@ -122,7 +116,11 @@ CONFIG_PATH = os.path.expanduser("~/.ufo_config.json")
 class AppDelegate(NSObject):
 
     def applicationDidFinishLaunching_(self, notification):
-        # Dock に表示しないアクセサリアプリとして動作
+        """
+        アプリ起動完了時に呼ばれる AppKit コールバック。
+        状態変数の初期化 → UI 構築 → タイマー登録 → Telegram ポーリング開始 の順に実行する。
+        """
+        # Dock に表示しないアクセサリアプリとして動作（メニューバーのみ）
         NSApp.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
 
         # --- 状態変数の初期化 ---
@@ -132,55 +130,57 @@ class AppDelegate(NSObject):
         icons.generate_all()
         self._load_menu_icons()
 
-        # メニューバーアイコンのアニメーション用カウンター
+        # メニューバーアイコン切り替え用カウンター（animationTick_ で増加）
         self._icon_tick = 0
-        self._chat_flash_ticks = 0  # >0 の間チャットアイコンを表示
+        # >0 の間、メニューバーをチャット受信アイコンに切り替える（約 0.5秒×N）
+        self._chat_flash_ticks = 0
 
-        # UFO 非表示フラグ
+        # UFO ウィンドウの非表示フラグ（"UFO を隠す" で切り替え）
         self._ufo_hidden = False
 
-        # ログパネル用: 行リスト + スレッド間受け渡しキュー
-        self._log_lines = []
-        self._log_queue = collections.deque()
-
-        # チャットパネル用: メッセージリスト + スレッド間受け渡しキュー
-        self._chat_messages = []        # list of ("sent" | "recv", text)
+        # チャットパネル用
+        # _chat_messages: 表示済みメッセージのリスト（direction, text） のタプルのリスト
+        #   direction: "sent"（送信）/ "recv"（受信・nanobot）/ "sys"（システム通知）
+        # _chat_queue: バックグラウンドスレッドからの受け渡しキュー（deque はスレッドセーフ）
+        self._chat_messages = []
         self._chat_queue = collections.deque()
 
-        # OCR パネル用: 結果キュー + 最終テキスト（コピー用）
-        self._ocr_result_queue = collections.deque()  # (text, is_final) tuples
+        # OCR パネル用
+        # _ocr_result_queue: バックグラウンドから (text, is_final) を受け渡すキュー
+        # _ocr_final_text: コピーボタン用の確定テキスト
+        # _ocr_original_text: 翻訳ボタン押下時の再翻訳元（OCR 直後に保存）
+        self._ocr_result_queue = collections.deque()
         self._ocr_final_text = ""
-        self._ocr_original_text = ""  # 翻訳元として保持（再翻訳時に使用）
+        self._ocr_original_text = ""
 
         # ショートカット登録パネル用
+        # _launchers: {"label": str, "url": str} のリスト（~/.ufo_config.json と同期）
+        # _launcher_dynamic_items: メニューに動的追加した NSMenuItem のリスト（削除時に使用）
         self._launchers = self._load_launchers()
         self._launcher_dynamic_items = []
 
-        # Telegram ポーラー（nanobot 停止中のみ動作）
+        # Telegram ポーラー（nanobot 起動中は stop() で一時停止）
+        # 受信したテキストをチャットキューに積み、メニューバーをチャットアイコンに切り替える
         def _on_recv(text):
             self._chat_queue.append(("recv", text))
-            self._chat_flash_ticks = 6  # 約3秒 💬🛸 を表示
+            self._chat_flash_ticks = 6  # 15tick × 6 ≒ 3秒間チャットアイコンを表示
         self._tg_poller = tg.TelegramPoller(on_message=_on_recv)
 
-        # --- UI セットアップ ---
-        self._setup_ufo_window()
-        self._setup_log_panel()
-        self._setup_message_panel()
-        self._setup_ocr_panel()
-        self._setup_launcher_panel()
-        self._setup_menu_bar()
-        self._start_animation()
+        # --- UI セットアップ（順序依存あり: メニューは最後に構築）---
+        self._setup_ufo_window()        # UFO 画像ウィンドウ
+        self._setup_message_panel()     # Telegram チャットパネル（右上固定）
+        self._setup_ocr_panel()         # OCR 結果パネル（UFO 直下）
+        self._setup_launcher_panel()    # ショートカット登録パネル（UFO 直下）
+        self._setup_menu_bar()          # メニューバーアイコン＋メニュー
+        self._start_animation()         # UFO アニメーションタイマー開始
 
-        # ログキューを 0.25秒ごとにメインスレッドで処理
-        self._add_timer("drainLogQueue:", 0.25, repeats=True)
-
-        # チャットキューを 0.5秒ごとにメインスレッドで処理
+        # バックグラウンド→メインスレッド間のキュー処理タイマー
+        # NSTimer はメインスレッドの RunLoop で実行されるため UI 更新が安全
         self._add_timer("drainChatQueue:", 0.5, repeats=True)
+        self._add_timer("drainOCRQueue:",  0.3, repeats=True)
 
-        # OCR 結果キューを 0.3秒ごとにメインスレッドで処理
-        self._add_timer("drainOCRQueue:", 0.3, repeats=True)
-
-        # Telegram ポーリング開始（nanobot が起動したら一時停止する）
+        # Telegram ポーリング開始
+        # nanobot 起動時は _start_nanobot() 内で stop() して競合を防ぐ
         self._tg_poller.start()
 
     # -----------------------------------------------------------------------
@@ -234,17 +234,24 @@ class AppDelegate(NSObject):
     # -----------------------------------------------------------------------
 
     def _setup_ufo_window(self):
-        """UFO 画像ウィンドウを生成して画面中央に配置する。"""
+        """
+        UFO 画像ウィンドウを生成して画面中央に配置する。
+
+        ウィンドウは NSWindowStyleMaskBorderless（タイトルバーなし）+ 透明背景で作成し、
+        level=25 で常に最前面に浮かせる。UFO.png は assets/ から読み込む。
+        """
         sf = NSScreen.mainScreen().frame()
-        start_x = (sf.size.width - UFO_SIZE) / 2
+        start_x = (sf.size.width  - UFO_SIZE) / 2
         start_y = (sf.size.height - UFO_SIZE) / 2
 
-        # アニメーション用の論理座標（wobble オフセットを除いた基準位置）
+        # 自律移動の基準座標（wobble オフセットを加える前の論理位置）
         self._pos_x = start_x
         self._pos_y = start_y
         self._target_x, self._target_y = self._random_waypoint()
 
         # ボーダレス・透明・最前面ウィンドウ
+        # CanJoinAllSpaces: 全スペース（Mission Control の仮想デスクトップ）で表示
+        # Stationary: Exposé/Spaces の操作でも動かない
         self._window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
             CGRectMake(start_x, start_y, UFO_SIZE, UFO_SIZE),
             NSWindowStyleMaskBorderless,
@@ -253,29 +260,26 @@ class AppDelegate(NSObject):
         )
         self._window.setOpaque_(False)
         self._window.setBackgroundColor_(NSColor.clearColor())
-        self._window.setLevel_(25)  # 通常ウィンドウより前面
+        self._window.setLevel_(25)  # NSStatusWindowLevel に相当
         self._window.setCollectionBehavior_(
             NSWindowCollectionBehaviorCanJoinAllSpaces
             | NSWindowCollectionBehaviorStationary
         )
         self._window.setHasShadow_(False)
 
-        # UFO 画像
+        # UFO 画像（assets/UFO.png、透過 PNG）
         assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
         ufo_image = NSImage.alloc().initWithContentsOfFile_(
             os.path.join(assets_dir, "UFO.png")
         )
-        image_view = NSImageView.alloc().initWithFrame_(
-            CGRectMake(0, 0, UFO_SIZE, UFO_SIZE)
-        )
+        image_view = NSImageView.alloc().initWithFrame_(CGRectMake(0, 0, UFO_SIZE, UFO_SIZE))
         image_view.setImage_(ufo_image)
         image_view.setImageScaling_(NSImageScaleProportionallyUpOrDown)
         image_view.setWantsLayer_(True)
 
-        # イベント受け取りビュー（画像の上に重ねる）
-        click_view = ClickableView.alloc().initWithFrame_(
-            CGRectMake(0, 0, UFO_SIZE, UFO_SIZE)
-        )
+        # ClickableView: 透明なイベント受け取り層を画像の上に重ねる
+        # クリック・ドラッグ・右クリックをすべてここで処理（views.py 参照）
+        click_view = ClickableView.alloc().initWithFrame_(CGRectMake(0, 0, UFO_SIZE, UFO_SIZE))
 
         self._window.contentView().addSubview_(image_view)
         self._window.contentView().addSubview_(click_view)
@@ -286,7 +290,10 @@ class AppDelegate(NSObject):
     # -----------------------------------------------------------------------
 
     def _start_animation(self):
-        """アニメーションタイマーを開始する。"""
+        """
+        UFO アニメーションタイマー（30fps）を開始する。
+        シングルクリックで停止・再開が切り替わる（toggleAnimation 参照）。
+        """
         self._ufo_visible = True
         self._start_time = time.monotonic()
         self._timer = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
@@ -296,31 +303,43 @@ class AppDelegate(NSObject):
 
     @objc.typedSelector(b"v@:@")
     def animationTick_(self, timer):
-        """60fps で呼ばれるアニメーションループ。移動 + wobble + パネル追従。"""
+        """
+        30fps で呼ばれるアニメーションループ。
+        ① 自律移動: ランダムなウェイポイントへ一定速度で直進し、到達したら次を選ぶ
+        ② ふわふわ: サイン波 2 波（縦・横）を基準座標に重ねて揺らす
+        ③ 連動パネル: OCR/ランチャーパネルを UFO 直下に追従させる
+        ④ アイコン: 15tick ごとにメニューバーアイコンを更新
+        """
         t = time.monotonic() - self._start_time
 
         if not self._ufo_hidden:
-            # ウェイポイントへ向かって直進
+            # ① 自律移動（ウェイポイントへ直進）
             dx = self._target_x - self._pos_x
             dy = self._target_y - self._pos_y
             dist = math.hypot(dx, dy)
             if dist < ARRIVE_THRESHOLD:
+                # 近づいたら次の目標点をランダムに選択
                 self._target_x, self._target_y = self._random_waypoint()
             else:
+                # 方向ベクトルを正規化してスピードを掛けて移動
                 self._pos_x += (dx / dist) * ROAM_SPEED
                 self._pos_y += (dy / dist) * ROAM_SPEED
 
-            # サイン波でふわふわ揺らす
+            # ② ふわふわ wobble（サイン波 2 つ）
+            # 縦方向: 周期 WOBBLE_PERIOD 秒、振れ幅 WOBBLE_Y_AMP px
+            # 横方向: 縦より 1.6 倍遅い周期でゆっくり揺れる
             wobble_y = WOBBLE_Y_AMP * math.sin(2.0 * math.pi * t / WOBBLE_PERIOD)
             wobble_x = WOBBLE_X_AMP * math.sin(2.0 * math.pi * t / (WOBBLE_PERIOD * 1.6))
 
             self._window.setFrameOrigin_(
                 CGPointMake(self._pos_x + wobble_x, self._pos_y + wobble_y)
             )
+
+            # ③ 連動パネル位置更新（表示中のみ内部で早期リターン）
             self._update_ocr_panel_position()
             self._update_launcher_panel_position()
 
-        # メニューバーアイコンを 15tick（約0.5秒）ごとに更新
+        # ④ メニューバーアイコンを 15tick（≒ 0.5秒）ごとに更新
         self._icon_tick += 1
         if self._icon_tick % 15 == 0:
             if self._chat_flash_ticks > 0:
@@ -355,127 +374,31 @@ class AppDelegate(NSObject):
             self._hide_item.setTitle_("UFO を表示")
 
     # -----------------------------------------------------------------------
-    # ログパネル
-    # -----------------------------------------------------------------------
-
-    def _setup_log_panel(self):
-        """
-        nanobot の stdout を表示する半透明ダークパネルを生成する。
-        初期位置は画面左下。起動時は非表示。
-        """
-        self._log_panel_visible = False
-
-        self._log_window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-            CGRectMake(20, 60, LOG_PANEL_W, LOG_PANEL_H),
-            NSWindowStyleMaskBorderless,
-            NSBackingStoreBuffered,
-            False,
-        )
-        self._log_window.setOpaque_(False)
-        self._log_window.setBackgroundColor_(NSColor.clearColor())
-        self._log_window.setLevel_(24)  # UFO (25) の 1 段下
-        self._log_window.setCollectionBehavior_(
-            NSWindowCollectionBehaviorCanJoinAllSpaces
-            | NSWindowCollectionBehaviorStationary
-        )
-        self._log_window.setHasShadow_(False)
-
-        # ドラッグ可能な背景ビュー（角丸・半透明ダーク）
-        bg = LogPanelView.alloc().initWithFrame_(
-            CGRectMake(0, 0, LOG_PANEL_W, LOG_PANEL_H)
-        )
-        bg.setWantsLayer_(True)
-        bg.layer().setBackgroundColor_(
-            NSColor.colorWithSRGBRed_green_blue_alpha_(0.05, 0.05, 0.05, 0.88).CGColor()
-        )
-        bg.layer().setCornerRadius_(12.0)
-
-        # スクロール可能なテキストビュー
-        p = LOG_PANEL_PADDING
-        inner_w = LOG_PANEL_W - p * 2
-        inner_h = LOG_PANEL_H - p * 2
-        scroll = NSScrollView.alloc().initWithFrame_(CGRectMake(p, p, inner_w, inner_h))
-        scroll.setHasVerticalScroller_(True)
-        scroll.setAutohidesScrollers_(True)
-        scroll.setBorderType_(0)
-        scroll.setDrawsBackground_(False)
-
-        self._log_text = NSTextView.alloc().initWithFrame_(
-            CGRectMake(0, 0, inner_w, inner_h)
-        )
-        self._log_text.setEditable_(False)
-        self._log_text.setSelectable_(True)
-        self._log_text.setDrawsBackground_(False)
-        self._log_text.setVerticallyResizable_(True)
-        self._log_text.setHorizontallyResizable_(False)
-        self._log_text.textContainer().setWidthTracksTextView_(True)
-        self._log_text.setMinSize_((inner_w, inner_h))
-        self._log_text.setMaxSize_((inner_w, 1e8))
-
-        scroll.setDocumentView_(self._log_text)
-        bg.addSubview_(scroll)
-        self._log_window.contentView().addSubview_(bg)
-
-    def _show_log_panel(self):
-        self._log_window.orderFrontRegardless()
-        self._log_panel_visible = True
-
-    def _hide_log_panel(self):
-        self._log_window.orderOut_(None)
-        self._log_panel_visible = False
-
-    @objc.typedSelector(b"v@:@")
-    def toggleLogPanel_(self, sender):
-        if self._log_panel_visible:
-            self._hide_log_panel()
-        else:
-            self._show_log_panel()
-
-    @objc.typedSelector(b"v@:@")
-    def drainLogQueue_(self, timer):
-        """ログキューをメインスレッドで処理してテキストビューを更新する。"""
-        if not self._log_queue:
-            return
-        changed = False
-        while self._log_queue:
-            try:
-                line = self._log_queue.popleft()
-                self._log_lines.append(line)
-                if len(self._log_lines) > LOG_MAX_LINES:
-                    self._log_lines.pop(0)
-                changed = True
-            except IndexError:
-                break
-        if changed:
-            self._refresh_log_view()
-
-    def _refresh_log_view(self):
-        """ログ行リストを緑の等幅フォントで表示する。"""
-        text = "\n".join(self._log_lines)
-        font = (
-            NSFont.fontWithName_size_("Menlo", 10)
-            or NSFont.monospacedSystemFontOfSize_weight_(10, 0)
-        )
-        color = NSColor.colorWithSRGBRed_green_blue_alpha_(0.2, 0.95, 0.45, 1.0)
-        attrs = {NSFontAttributeName: font, NSForegroundColorAttributeName: color}
-        self._log_text.textStorage().setAttributedString_(
-            NSAttributedString.alloc().initWithString_attributes_(text, attrs)
-        )
-        self._log_text.scrollRangeToVisible_((len(text), 0))
-
-    # -----------------------------------------------------------------------
     # メッセージパネル（Telegram チャット）
     # -----------------------------------------------------------------------
 
     def _setup_message_panel(self):
         """
-        固定チャットパネルを生成する（UFO 非連動・ドラッグ移動可能）。
-        デフォルト位置: 画面右上。チャット履歴 + 入力欄を1ウィンドウに統合。
+        固定チャットパネル（Telegram 送受信 + nanobot 出力）を生成する。
+
+        構造:
+          ┌──────────────────────┐
+          │ チャット履歴スクロール │  ← NSTextView（LINE 風左右配置）
+          ├──────────────────────┤
+          │ 入力欄     │ 送信ボタン│  ← NSTextField + NSButton
+          └◤────────────────────┘
+           ↑ リサイズハンドル（左下）
+
+        - KeyableWindow: ボーダレスでもキーボード入力を受け付けるサブクラス
+        - LogPanelView: 背景ビューをドラッグで移動できるサブクラス
+        - ResizeHandleView: 左下ドラッグで右上固定リサイズ
+        - メッセージパネルは UFO と連動しない（固定位置・独立ドラッグ）
         """
         self._msg_panel_visible = False
 
         sf = NSScreen.mainScreen().frame()
-        init_x = sf.size.width - MSG_PANEL_W - 20
+        # デフォルト位置: 画面右上（メニューバー 40px 分を引いて隙間を確保）
+        init_x = sf.size.width  - MSG_PANEL_W - 20
         init_y = sf.size.height - MSG_PANEL_H - 40
 
         self._msg_window = KeyableWindow.alloc().initWithContentRect_styleMask_backing_defer_(
@@ -587,13 +510,19 @@ class AppDelegate(NSObject):
         self._msg_panel_item.setTitle_("✉️ Telegram接続")
 
     def resize_msg_panel(self, new_w, new_h):
-        """リサイズハンドルからのコールバック。サブビューとフォントを更新する。"""
+        """
+        ResizeHandleView からのコールバック。ウィンドウリサイズに合わせて
+        すべてのサブビューの frame を再計算し、フォントサイズを比例変更する。
+
+        呼び出し元: views.ResizeHandleView.mouseDragged_
+        フォントサイズ: パネル初期高さ 320px を基準に 10〜22pt の範囲でスケール
+        """
         p = 8
         send_w = 46
         field_w = new_w - p * 2 - send_w - 6
-        chat_y = p + MSG_INPUT_H + 6
-        chat_w = new_w - p * 2
-        chat_h = max(60, new_h - chat_y - p)
+        chat_y  = p + MSG_INPUT_H + 6
+        chat_w  = new_w - p * 2
+        chat_h  = max(60, new_h - chat_y - p)
 
         self._msg_bg.setFrame_(CGRectMake(0, 0, new_w, new_h))
         self._msg_scroll.setFrame_(CGRectMake(p, chat_y, chat_w, chat_h))
@@ -602,6 +531,7 @@ class AppDelegate(NSObject):
         self._msg_field.setFrame_(CGRectMake(p, p, field_w, MSG_INPUT_H))
         self._msg_send_btn.setFrame_(CGRectMake(p + field_w + 6, p, send_w, MSG_INPUT_H))
 
+        # フォントサイズをパネル高さに比例させる（初期高さ 320px → 12pt 基準）
         font_size = max(10, min(22, round(12 * new_h / 320.0)))
         self._chat_font = NSFont.systemFontOfSize_(font_size)
         self._refresh_chat_view()
@@ -628,19 +558,28 @@ class AppDelegate(NSObject):
 
     def _refresh_chat_view(self):
         """
-        チャット履歴を LINE 風に再描画する。
-        送信: 右寄せ (alignment=1)・グレー背景
-        受信: 左寄せ (alignment=0)・水色 or 緑背景（nanobot）
+        チャット履歴を LINE 風に再描画する（全件再構築）。
+
+        メッセージ種別と配置:
+          sent: 右寄せ (alignment=1)・グレー背景   ← 自分の送信
+          recv: 左寄せ (alignment=0)・水色背景      ← Telegram 受信
+          recv (🤖 prefix): 左寄せ・緑背景          ← nanobot AI 応答
+          sys:  中央 (alignment=2)・グレー文字      ← システム通知
+
+        NOTE: NSTextAlignmentRight = 1（Left=0, Center=2）
+        段落スタイル設定に失敗した場合は→/←記号のプレーンテキストにフォールバックする。
         """
         try:
             combined = NSMutableAttributedString.alloc().init()
-            sent_fg   = NSColor.colorWithSRGBRed_green_blue_alpha_(0.1,  0.1,  0.1,  1.0)
-            recv_fg   = NSColor.colorWithSRGBRed_green_blue_alpha_(0.05, 0.25, 0.55, 1.0)
-            bot_fg    = NSColor.colorWithSRGBRed_green_blue_alpha_(0.05, 0.40, 0.15, 1.0)
-            sent_bg   = NSColor.colorWithSRGBRed_green_blue_alpha_(0.80, 0.80, 0.80, 0.80)
-            recv_bg   = NSColor.colorWithSRGBRed_green_blue_alpha_(0.72, 0.88, 1.0,  0.85)
-            bot_bg    = NSColor.colorWithSRGBRed_green_blue_alpha_(0.82, 0.95, 0.82, 0.85)
-            sys_fg    = NSColor.colorWithSRGBRed_green_blue_alpha_(0.5,  0.5,  0.5,  1.0)
+            # 色定義
+            sent_fg  = NSColor.colorWithSRGBRed_green_blue_alpha_(0.1,  0.1,  0.1,  1.0)
+            recv_fg  = NSColor.colorWithSRGBRed_green_blue_alpha_(0.05, 0.25, 0.55, 1.0)
+            bot_fg   = NSColor.colorWithSRGBRed_green_blue_alpha_(0.05, 0.40, 0.15, 1.0)
+            sent_bg  = NSColor.colorWithSRGBRed_green_blue_alpha_(0.80, 0.80, 0.80, 0.80)
+            recv_bg  = NSColor.colorWithSRGBRed_green_blue_alpha_(0.72, 0.88, 1.0,  0.85)
+            bot_bg   = NSColor.colorWithSRGBRed_green_blue_alpha_(0.82, 0.95, 0.82, 0.85)
+            sys_fg   = NSColor.colorWithSRGBRed_green_blue_alpha_(0.5,  0.5,  0.5,  1.0)
+            # メッセージ間の余白（4pt フォントの改行で代用）
             spacer_attrs = {NSFontAttributeName: NSFont.systemFontOfSize_(4)}
 
             for direction, text in self._chat_messages:
@@ -717,7 +656,20 @@ class AppDelegate(NSObject):
     # -----------------------------------------------------------------------
 
     def _setup_ocr_panel(self):
-        """glm-ocr の結果を表示する半透明ダークパネルを生成する。初期は非表示。"""
+        """
+        OCR 結果パネルを生成する（初期は非表示）。
+
+        構造（下から上に積み上げ）:
+          [コピー] [閉じる]        ← ボタン行1（最下部）
+          [日本語] [English] [中文] ← ボタン行2（翻訳）
+          テキスト表示スクロール    ← OCR 結果 or 翻訳結果
+
+        使用モデル:
+          OCR: glm-ocr（Ollama 経由）
+          翻訳: translategemma:4b（Ollama 経由）
+
+        位置: UFO ウィンドウの直下に追従（_update_ocr_panel_position）
+        """
         self._ocr_panel_visible = False
 
         self._ocr_window = KeyableWindow.alloc().initWithContentRect_styleMask_backing_defer_(
@@ -871,8 +823,15 @@ class AppDelegate(NSObject):
     # ショートカット登録パネル
     # -----------------------------------------------------------------------
 
+    # -----------------------------------------------------------------------
+    # ショートカット登録（URL ランチャー）
+    # -----------------------------------------------------------------------
+    # 設定は ~/.ufo_config.json の "launchers" キーに保存:
+    #   {"launchers": [{"label": "ChatGPT", "url": "https://chatgpt.com"}, ...]}
+    # パネルで追加/削除するたびに JSON を即時保存してメニューも再構築する。
+
     def _load_launchers(self):
-        """~/.ufo_config.json から launchers リストを読み込む。"""
+        """~/.ufo_config.json から launchers リストを読み込む。ファイルがなければ空リスト。"""
         try:
             with open(CONFIG_PATH) as f:
                 data = json.load(f)
@@ -896,10 +855,21 @@ class AppDelegate(NSObject):
             with open(CONFIG_PATH, "w") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            self._log_queue.append(f"[Launcher] 保存エラー: {e}")
+            self._chat_queue.append(("sys", f"⚠️ ショートカット保存エラー: {e}"))
 
     def _setup_launcher_panel(self):
-        """ショートカット登録パネルを生成する。初期は非表示。"""
+        """
+        ショートカット登録パネルを生成する（初期は非表示）。
+
+        構造（下から上）:
+          [名前入力] [URL入力] [📋] [追加]  ← 入力行
+          [            閉じる           ]  ← 最下部ボタン
+          スクロールリスト: 登録済み一覧    ← ラベル + URL + [✕]
+
+        位置: UFO ウィンドウの直下に追従（_update_launcher_panel_position）
+        キー入力: KeyableWindow でアクセサリアプリでも入力可能
+        📋 ボタン: アクセサリアプリでは Cmd+V が届かないためクリップボード貼り付けで代替
+        """
         self._launcher_panel_visible = False
 
         self._launcher_window = KeyableWindow.alloc().initWithContentRect_styleMask_backing_defer_(
@@ -1048,13 +1018,19 @@ class AppDelegate(NSObject):
         self._launcher_scroll.setDocumentView_(content_view)
 
     def _rebuild_launcher_menu(self, menu=None):
-        """メニューの動的ランチャーアイテムを再構築する。"""
+        """
+        メニューの動的ランチャーアイテム（🔗 ...）を再構築する。
+
+        menu 引数: _setup_menu_bar() から呼ぶ際は setMenu_ 前なので直接渡す。
+                   追加/削除後の再構築時は None でよい（self._status_item.menu() を使用）。
+        """
         if menu is None:
             menu = self._status_item.menu()
         for item in self._launcher_dynamic_items:
             menu.removeItem_(item)
         self._launcher_dynamic_items = []
 
+        # _launcher_register_item の次のインデックスに順番に挿入
         base_idx = menu.indexOfItem_(self._launcher_register_item) + 1
         for i, entry in enumerate(self._launchers):
             item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
@@ -1138,7 +1114,13 @@ class AppDelegate(NSObject):
         if url:
             subprocess.Popen(["open", url])
 
-    # 翻訳ボタン（translategemma:4b）
+    # -----------------------------------------------------------------------
+    # OCR 翻訳（translategemma:4b via Ollama）
+    # -----------------------------------------------------------------------
+    # 翻訳ボタン3種: translateJA_ / translateEN_ / translateZH_
+    # → _start_translate(lang) → バックグラウンドで _run_translate(text, lang)
+    # → 結果を _ocr_result_queue に積む → drainOCRQueue_ で表示
+
     @objc.typedSelector(b"v@:@")
     def translateJA_(self, sender):
         self._start_translate("Japanese")
@@ -1152,7 +1134,7 @@ class AppDelegate(NSObject):
         self._start_translate("Chinese")
 
     def _start_translate(self, lang):
-        """翻訳をバックグラウンドスレッドで開始する。"""
+        """翻訳をバックグラウンドスレッドで開始する。元テキスト(_ocr_original_text)を使用。"""
         src = self._ocr_original_text.strip()
         if not src:
             return
@@ -1224,14 +1206,12 @@ class AppDelegate(NSObject):
     @objc.typedSelector(b"v@:@")
     def openNFTPages_(self, sender):
         """Pinata ストレージと mint サイトをブラウザで開く。"""
-        import subprocess
         subprocess.Popen(["open", "https://app.pinata.cloud/ipfs/files"])
         subprocess.Popen(["open", "https://sui-mint.torus-studio.tech/"])
 
     @objc.typedSelector(b"v@:@")
     def launchClaudeCode_(self, sender):
         """Terminal を開いて UFO プロジェクトで claude を起動する。"""
-        import subprocess
         project_dir = os.path.dirname(os.path.abspath(__file__))
         script = f'tell application "Terminal" to do script "cd {project_dir} && claude"'
         subprocess.Popen(["osascript", "-e", script])
@@ -1245,7 +1225,15 @@ class AppDelegate(NSObject):
             return False
 
     def _ensure_ollama_running(self):
-        """Ollama が起動していなければ起動して、最大15秒待つ。"""
+        """
+        Ollama が起動していなければ自動起動し、最大 15 秒待機する。
+
+        起動順:
+          1. `open -a Ollama`（Mac アプリ版）を試みる
+          2. 失敗した場合 `ollama serve`（CLI 版）を試みる
+          3. 1秒ごとにポートを確認し、接続できれば True を返す
+          4. 15秒経過しても起動しなければ False を返す
+        """
         if self._check_ollama_api():
             return True
         self._ocr_result_queue.append(("Ollama 起動中...", False))
@@ -1316,16 +1304,21 @@ class AppDelegate(NSObject):
             return
         config = tg.load_config()
         if not config:
-            self._log_queue.append(
-                "[Telegram] 未設定: ~/.ufo_config.json か ~/.nanobot/config.json を確認してください"
-            )
-            self._show_log_panel()
+            # 設定が見つからない場合はチャットにシステムメッセージを表示
+            self._chat_queue.append((
+                "sys",
+                "⚠️ Telegram 未設定 — ~/.ufo_config.json を確認してください",
+            ))
+            self._show_msg_panel()
             return
         token = config.get("telegram_token", "")
         chat_id = str(config.get("telegram_chat_id", ""))
         if not token or not chat_id:
-            self._log_queue.append("[Telegram] telegram_token または telegram_chat_id が未設定です")
-            self._show_log_panel()
+            self._chat_queue.append((
+                "sys",
+                "⚠️ telegram_token または telegram_chat_id が未設定です",
+            ))
+            self._show_msg_panel()
             return
 
         self._msg_field.setStringValue_("")
@@ -1335,25 +1328,9 @@ class AppDelegate(NSObject):
             try:
                 tg.send_message(token, chat_id, text)
             except Exception as e:
-                self._log_queue.append(f"[Telegram] 送信エラー: {e}")
+                self._chat_queue.append(("sys", f"⚠️ 送信エラー: {e}"))
 
         threading.Thread(target=_send, daemon=True).start()
-
-    @objc.typedSelector(b"v@:@")
-    def showTelegramStatus_(self, sender):
-        """現在の Telegram 設定状況をログパネルに表示する。"""
-        config = tg.load_config()
-        if config:
-            token = config.get("telegram_token", "")
-            chat_id = config.get("telegram_chat_id", "")
-            masked = token[:8] + "..." if len(token) > 8 else "(未設定)"
-            self._log_queue.append(f"[Telegram] token: {masked}  chat_id: {chat_id}")
-        else:
-            self._log_queue.append(
-                "[Telegram] 設定なし — ~/.ufo_config.json を作成してください\n"
-                '  例: {"telegram_token": "123:ABC...", "telegram_chat_id": "987654321"}'
-            )
-        self._show_log_panel()
 
     # -----------------------------------------------------------------------
     # nanobot ゲートウェイ制御
@@ -1370,23 +1347,33 @@ class AppDelegate(NSObject):
             self._start_nanobot()
 
     def _start_nanobot(self):
+        """
+        nanobot ゲートウェイ（~/Desktop/nanobot）を起動する。
+
+        起動手順:
+          1. TelegramPoller を停止（Bot トークン競合防止）
+          2. nanobot を `uv run nanobot gateway` で起動（失敗時は .venv 直接実行）
+          3. プロセスグループ（os.setsid）を使うことで SIGTERM を子プロセスまで伝播
+          4. stdout をバックグラウンドスレッドで読み続けてチャットに流す
+        """
         if self._is_nanobot_running():
             return
 
-        # nanobot が getUpdates を使うため UFO 側のポーリングを停止
+        # nanobot が Bot API の getUpdates を使うため、UFO 側ポーリングと競合する
+        # → nanobot 起動前に停止。停止後に _stop_nanobot() で再開する
         self._tg_poller.stop()
 
-        # チャットパネルを表示（nanobot の出力をチャットに流す）
+        # チャットパネルを表示（nanobot 出力をリアルタイムで確認できるように）
         self._show_msg_panel()
 
-        # uv run nanobot gateway を起動（uv が見つからなければ venv 直接実行）
+        # uv が PATH にあれば `uv run nanobot gateway`、なければ .venv を直接実行
         try:
             self._nanobot_proc = subprocess.Popen(
                 ["uv", "run", "nanobot", "gateway"],
                 cwd=NANOBOT_DIR,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                preexec_fn=os.setsid,
+                preexec_fn=os.setsid,  # プロセスグループを作成（SIGTERM 一括送信用）
             )
         except FileNotFoundError:
             venv_bin = os.path.join(NANOBOT_DIR, ".venv", "bin", "nanobot")
@@ -1398,7 +1385,7 @@ class AppDelegate(NSObject):
                 preexec_fn=os.setsid,
             )
 
-        # stdout をバックグラウンドスレッドで読んでログキューに積む
+        # stdout を別スレッドで読み続けてチャットキューに流す
         threading.Thread(
             target=self._read_nanobot_output,
             args=(self._nanobot_proc,),
@@ -1411,6 +1398,12 @@ class AppDelegate(NSObject):
         self._update_chat_mode()
 
     def _stop_nanobot(self):
+        """
+        nanobot プロセスを停止して Telegram ポーリングを再開する。
+
+        SIGTERM → 5秒待機 → タイムアウト時 SIGKILL の順で安全に終了させる。
+        os.killpg でプロセスグループ全体に送信し、子プロセスも道連れにする。
+        """
         if not self._is_nanobot_running():
             return
         os.killpg(os.getpgid(self._nanobot_proc.pid), signal.SIGTERM)
@@ -1422,15 +1415,20 @@ class AppDelegate(NSObject):
         self._nanobot_item.setTitle_("🐈 nanobot起動")
         self._update_menu_bar_icon()
 
-        # nanobot 停止後に UFO 側のポーリングを再開
+        # nanobot 停止後に UFO 側のポーリングを再開（Telegram 直接受信に戻る）
         self._tg_poller.start()
         self._chat_queue.append(("sys", "📱 nanobot 停止 — Telegram 受信に切り替えました"))
         self._update_chat_mode()
 
     def _update_chat_mode(self):
-        """nanobot の稼働状態に合わせてチャットパネルの外観とプレースホルダーを更新する。"""
+        """
+        nanobot の稼働状態に合わせてチャットパネルの外観を更新する。
+
+        nanobot 起動中: 緑がかった背景 + AI 案内プレースホルダー
+        Telegram のみ:  グレー背景 + 送信案内プレースホルダー
+        """
         if not hasattr(self, "_msg_bg"):
-            return
+            return  # _setup_message_panel 完了前に呼ばれることがあるためガード
         if self._is_nanobot_running():
             color = NSColor.colorWithSRGBRed_green_blue_alpha_(0.92, 0.97, 0.93, 0.97).CGColor()
             self._msg_field.setPlaceholderString_("🤖 nanobot起動中 — AI が返答します")
@@ -1440,7 +1438,10 @@ class AppDelegate(NSObject):
         self._msg_bg.layer().setBackgroundColor_(color)
 
     def _read_nanobot_output(self, proc):
-        """nanobot の stdout をバックグラウンドで読み続けてチャットキューに積む。"""
+        """
+        nanobot の stdout をバックグラウンドで 1 行ずつ読み続けてチャットキューに積む。
+        プロセス終了（EOF）またはエラーで自然終了する。
+        """
         try:
             for raw in iter(proc.stdout.readline, b""):
                 line = raw.decode("utf-8", errors="replace").rstrip()
@@ -1513,8 +1514,6 @@ class AppDelegate(NSObject):
         )
         self._autostart_item.setState_(1 if autostart.is_enabled() else 0)
 
-        menu.addItem_(NSMenuItem.separatorItem())
-
         self._status_item.setMenu_(menu)
 
     def _make_menu_item(self, title, action, key, menu):
@@ -1525,15 +1524,23 @@ class AppDelegate(NSObject):
         return item
 
     def _update_menu_bar_icon(self):
-        """稼働状態に合わせてメニューバーのドット絵アイコンを更新する。"""
+        """
+        稼働状態に合わせてメニューバーのドット絵アイコンを切り替える。
+
+        優先度:
+          1. チャット受信直後（_chat_flash_ticks > 0）→ mb_chat.png（パイプ付き）
+          2. nanobot 起動中                          → mb_active_a/b（点滅アニメ）
+          3. 通常                                    → mb_idle.png
+        """
         if self._chat_flash_ticks > 0:
             img = self._icon_chat
         elif self._is_nanobot_running():
+            # 15tick ごとに a/b を切り替えて点滅させる
             img = self._icon_active_a if (self._icon_tick // 15) % 2 == 0 else self._icon_active_b
         else:
             img = self._icon_idle
         btn = self._status_item.button()
-        btn.setTitle_("")
+        btn.setTitle_("")   # テキストを消してアイコンのみ表示
         btn.setImage_(img)
 
     # -----------------------------------------------------------------------

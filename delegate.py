@@ -99,7 +99,7 @@ MSG_INPUT_H = 28   # 入力フィールド（下部）の高さ
 
 # OCR パネルのサイズ
 OCR_PANEL_W = 300
-OCR_PANEL_H = 240
+OCR_PANEL_H = 270   # 翻訳ボタン行分を追加
 OCR_PAD = 8
 OCR_BTN_H = 28
 
@@ -139,6 +139,7 @@ class AppDelegate(NSObject):
         # OCR パネル用: 結果キュー + 最終テキスト（コピー用）
         self._ocr_result_queue = collections.deque()  # (text, is_final) tuples
         self._ocr_final_text = ""
+        self._ocr_original_text = ""  # 翻訳元として保持（再翻訳時に使用）
 
         # Telegram ポーラー（nanobot 停止中のみ動作）
         def _on_recv(text):
@@ -638,7 +639,7 @@ class AppDelegate(NSObject):
         )
         bg.layer().setCornerRadius_(12.0)
 
-        # ボタン行（下部）
+        # ボタン行1（最下部）: コピー / 閉じる
         btn_w = (OCR_PANEL_W - OCR_PAD * 2 - 6) // 2
         copy_btn = NSButton.alloc().initWithFrame_(
             CGRectMake(OCR_PAD, OCR_PAD, btn_w, OCR_BTN_H)
@@ -656,8 +657,24 @@ class AppDelegate(NSObject):
         close_btn.setAction_("closeOCRPanel:")
         close_btn.setTarget_(self)
 
+        # ボタン行2（翻訳）: 日本語 / English / 中文
+        row2_y = OCR_PAD + OCR_BTN_H + 6
+        btn_w3 = (OCR_PANEL_W - OCR_PAD * 2 - 10) // 3
+        for i, (title, action) in enumerate([
+            ("日本語", "translateJA:"),
+            ("English", "translateEN:"),
+            ("中文",   "translateZH:"),
+        ]):
+            bx = OCR_PAD + i * (btn_w3 + 5)
+            btn = NSButton.alloc().initWithFrame_(CGRectMake(bx, row2_y, btn_w3, OCR_BTN_H))
+            btn.setTitle_(title)
+            btn.setBezelStyle_(1)
+            btn.setAction_(action)
+            btn.setTarget_(self)
+            bg.addSubview_(btn)
+
         # テキスト表示エリア（上部）
-        text_y = OCR_PAD + OCR_BTN_H + OCR_PAD
+        text_y = row2_y + OCR_BTN_H + OCR_PAD
         text_h = OCR_PANEL_H - text_y - OCR_PAD
         inner_w = OCR_PANEL_W - OCR_PAD * 2
 
@@ -730,6 +747,7 @@ class AppDelegate(NSObject):
         if text is not None:
             if is_final:
                 self._ocr_final_text = text
+                self._ocr_original_text = text  # 翻訳元として保持
             self._refresh_ocr_view(text)
 
     @objc.typedSelector(b"v@:@")
@@ -744,6 +762,61 @@ class AppDelegate(NSObject):
     @objc.typedSelector(b"v@:@")
     def closeOCRPanel_(self, sender):
         self._hide_ocr_panel()
+
+    # 翻訳ボタン（translategemma:4b）
+    @objc.typedSelector(b"v@:@")
+    def translateJA_(self, sender):
+        self._start_translate("Japanese")
+
+    @objc.typedSelector(b"v@:@")
+    def translateEN_(self, sender):
+        self._start_translate("English")
+
+    @objc.typedSelector(b"v@:@")
+    def translateZH_(self, sender):
+        self._start_translate("Chinese")
+
+    def _start_translate(self, lang):
+        """翻訳をバックグラウンドスレッドで開始する。"""
+        src = self._ocr_original_text.strip()
+        if not src:
+            return
+        self._refresh_ocr_view(f"翻訳中 ({lang})...")
+        threading.Thread(
+            target=self._run_translate,
+            args=(src, lang),
+            daemon=True,
+        ).start()
+
+    def _run_translate(self, text, lang):
+        """バックグラウンドスレッドで translategemma:4b を呼び出す。"""
+        if not self._ensure_ollama_running():
+            self._ocr_result_queue.append((
+                "Ollama に接続できませんでした。",
+                False,
+            ))
+            return
+
+        prompt = f"Translate the following text to {lang}. Output only the translation, no explanations:\n\n{text}"
+        try:
+            payload = json.dumps({
+                "model": "translategemma:4b",
+                "prompt": prompt,
+                "stream": False,
+            }).encode("utf-8")
+
+            req = urllib.request.Request(
+                "http://localhost:11434/api/generate",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+
+            translated = result.get("response", "").strip() or "(翻訳結果なし)"
+            self._ocr_result_queue.append((translated, False))
+        except Exception as e:
+            self._ocr_result_queue.append((f"翻訳エラー: {e}", False))
 
     @objc.typedSelector(b"v@:@")
     def startOCR_(self, sender):

@@ -402,12 +402,12 @@ class AppDelegate(NSObject):
     def _show_log_panel(self):
         self._log_window.orderFrontRegardless()
         self._log_panel_visible = True
-        self._log_panel_item.setTitle_("ログを非表示")
+        self._log_panel_item.setTitle_("📝 ログ非表示")
 
     def _hide_log_panel(self):
         self._log_window.orderOut_(None)
         self._log_panel_visible = False
-        self._log_panel_item.setTitle_("ログを表示")
+        self._log_panel_item.setTitle_("📝 ログ表示")
 
     @objc.typedSelector(b"v@:@")
     def toggleLogPanel_(self, sender):
@@ -541,12 +541,12 @@ class AppDelegate(NSObject):
         self._msg_panel_visible = True  # 先にセットしないと位置更新がスキップされる
         self._update_msg_panel_position()
         self._msg_window.orderFrontRegardless()
-        self._msg_panel_item.setTitle_("メッセージ欄を非表示")
+        self._msg_panel_item.setTitle_("✉️ メッセージ欄を非表示")
 
     def _hide_msg_panel(self):
         self._msg_window.orderOut_(None)
         self._msg_panel_visible = False
-        self._msg_panel_item.setTitle_("メッセージ欄を表示")
+        self._msg_panel_item.setTitle_("✉️ メッセージ欄")
 
     @objc.typedSelector(b"v@:@")
     def toggleMsgPanel_(self, sender):
@@ -952,7 +952,7 @@ class AppDelegate(NSObject):
             daemon=True,
         ).start()
 
-        self._nanobot_item.setTitle_("nanobot 停止")
+        self._nanobot_item.setTitle_("🐈 nanobot停止")
         self._update_menu_bar_icon()
 
     def _stop_nanobot(self):
@@ -964,7 +964,7 @@ class AppDelegate(NSObject):
         except subprocess.TimeoutExpired:
             os.killpg(os.getpgid(self._nanobot_proc.pid), signal.SIGKILL)
         self._nanobot_proc = None
-        self._nanobot_item.setTitle_("nanobot 起動")
+        self._nanobot_item.setTitle_("🐈 nanobot起動")
         self._update_menu_bar_icon()
 
         # nanobot 停止後に UFO 側のポーリングを再開
@@ -1012,20 +1012,20 @@ class AppDelegate(NSObject):
         # nanobot ゲートウェイ
         self._nanobot_item = self._make_menu_item("🐈 nanobot起動", "toggleNanobot:", "n", menu)
 
-        # ログパネル
-        self._log_panel_item = self._make_menu_item("📝 ログ表示", "toggleLogPanel:", "l", menu)
-
         # メッセージパネル
         self._msg_panel_item = self._make_menu_item("✉️ メッセージ欄", "toggleMsgPanel:", "m", menu)
-
-        # チャットクリア
-        self._make_menu_item("🧹 チャットをクリア", "clearChat:", "", menu)
 
         # OCR 解析
         self._make_menu_item("🔍 OCR 解析", "startOCR:", "o", menu)
 
-        # NFT 化
-        self._make_menu_item("🎖️ NFT化", "openNFTPages:", "", menu)
+        # NFT 作成
+        self._make_menu_item("🎖️ NFT作成", "openNFTPages:", "", menu)
+
+        # ログパネル
+        self._log_panel_item = self._make_menu_item("📝 ログ表示", "toggleLogPanel:", "l", menu)
+
+        # チャットクリア
+        self._make_menu_item("🧹 チャットクリア", "clearChat:", "", menu)
 
         menu.addItem_(NSMenuItem.separatorItem())
 

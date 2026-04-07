@@ -91,11 +91,14 @@ LOG_PANEL_H = 220
 LOG_PANEL_PADDING = 10
 LOG_MAX_LINES = 150      # これを超えたら古い行を捨てる
 
-# メッセージパネルのサイズ
+# メッセージパネルのサイズ（チャット履歴のみ、入力欄は吹き出しへ）
 MSG_PANEL_W = 230
-MSG_PANEL_H = 170
-MSG_CHAT_H = 118   # チャット表示エリア（上部）の高さ
-MSG_INPUT_H = 28   # 入力フィールド（下部）の高さ
+MSG_PANEL_H = 140
+MSG_CHAT_H = 124
+
+# 入力吹き出しのサイズ（UFO 上部に表示）
+INPUT_BUBBLE_W = 230
+INPUT_BUBBLE_H = 44
 
 # OCR パネルのサイズ
 OCR_PANEL_W = 300
@@ -164,6 +167,7 @@ class AppDelegate(NSObject):
         self._setup_ufo_window()
         self._setup_log_panel()
         self._setup_message_panel()
+        self._setup_input_bubble()
         self._setup_ocr_panel()
         self._setup_launcher_panel()
         self._setup_menu_bar()
@@ -316,6 +320,7 @@ class AppDelegate(NSObject):
                 CGPointMake(self._pos_x + wobble_x, self._pos_y + wobble_y)
             )
             self._update_msg_panel_position()
+            self._update_input_bubble_position()
             self._update_ocr_panel_position()
             self._update_launcher_panel_position()
 
@@ -469,15 +474,9 @@ class AppDelegate(NSObject):
     # -----------------------------------------------------------------------
 
     def _setup_message_panel(self):
-        """
-        UFO 直下に表示するチャットパネルを生成する。
-        上部: 送受信履歴（NSTextView）
-        下部: 入力フィールド（NSTextField、Enter で送信）
-        パネル板自体は透明、各メッセージに個別の背景色を付ける。
-        """
+        """UFO 直下にチャット履歴パネルを生成する（入力欄は UFO 上部の吹き出しへ）。"""
         self._msg_panel_visible = False
 
-        # KeyableWindow: ボーダレスでもキーボード入力を受け付ける
         self._msg_window = KeyableWindow.alloc().initWithContentRect_styleMask_backing_defer_(
             CGRectMake(0, 0, MSG_PANEL_W, MSG_PANEL_H),
             NSWindowStyleMaskBorderless,
@@ -493,32 +492,17 @@ class AppDelegate(NSObject):
         )
         self._msg_window.setHasShadow_(False)
 
-        # 透明な背景コンテナ
         bg = NSView.alloc().initWithFrame_(CGRectMake(0, 0, MSG_PANEL_W, MSG_PANEL_H))
         bg.setWantsLayer_(True)
-        bg.layer().setBackgroundColor_(NSColor.clearColor().CGColor())
-
-        p = 7    # パディング
-        gap = 5  # 入力欄とチャット欄の隙間
-
-        # 入力フィールド（下部）
-        self._msg_field = NSTextField.alloc().initWithFrame_(
-            CGRectMake(p, p, MSG_PANEL_W - p * 2, MSG_INPUT_H)
+        bg.layer().setBackgroundColor_(
+            NSColor.colorWithSRGBRed_green_blue_alpha_(0.96, 0.96, 0.97, 0.96).CGColor()
         )
-        self._msg_field.setPlaceholderString_("")
-        self._msg_field.setBezeled_(False)
-        self._msg_field.setDrawsBackground_(False)
-        self._msg_field.setTextColor_(NSColor.darkGrayColor())
-        self._msg_field.setFont_(NSFont.systemFontOfSize_(12))
-        self._msg_field.setFocusRingType_(1)  # NSFocusRingTypeNone: クリック時の水色枠を消す
-        self._msg_field.setAction_("sendTelegramMessage:")
-        self._msg_field.setTarget_(self)
+        bg.layer().setCornerRadius_(12.0)
 
-        # チャット履歴表示エリア（上部）
-        chat_y = p + MSG_INPUT_H + gap
+        p = 7
         chat_w = MSG_PANEL_W - p * 2
         scroll = NSScrollView.alloc().initWithFrame_(
-            CGRectMake(p, chat_y, chat_w, MSG_CHAT_H)
+            CGRectMake(p, p, chat_w, MSG_CHAT_H)
         )
         scroll.setHasVerticalScroller_(True)
         scroll.setAutohidesScrollers_(True)
@@ -540,8 +524,61 @@ class AppDelegate(NSObject):
 
         scroll.setDocumentView_(self._chat_text)
         bg.addSubview_(scroll)
-        bg.addSubview_(self._msg_field)
         self._msg_window.contentView().addSubview_(bg)
+
+    def _setup_input_bubble(self):
+        """UFO 上部に表示する入力吹き出しウィンドウを生成する。"""
+        self._bubble_window = KeyableWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+            CGRectMake(0, 0, INPUT_BUBBLE_W, INPUT_BUBBLE_H),
+            NSWindowStyleMaskBorderless,
+            NSBackingStoreBuffered,
+            False,
+        )
+        self._bubble_window.setOpaque_(False)
+        self._bubble_window.setBackgroundColor_(NSColor.clearColor())
+        self._bubble_window.setLevel_(25)
+        self._bubble_window.setCollectionBehavior_(
+            NSWindowCollectionBehaviorCanJoinAllSpaces
+            | NSWindowCollectionBehaviorStationary
+        )
+        self._bubble_window.setHasShadow_(True)
+
+        bg = NSView.alloc().initWithFrame_(
+            CGRectMake(0, 0, INPUT_BUBBLE_W, INPUT_BUBBLE_H)
+        )
+        bg.setWantsLayer_(True)
+        bg.layer().setBackgroundColor_(
+            NSColor.colorWithSRGBRed_green_blue_alpha_(0.98, 0.98, 1.0, 0.97).CGColor()
+        )
+        bg.layer().setCornerRadius_(14.0)
+
+        p = 8
+        send_w = 46
+        field_w = INPUT_BUBBLE_W - p * 2 - send_w - 6
+
+        self._msg_field = NSTextField.alloc().initWithFrame_(
+            CGRectMake(p, (INPUT_BUBBLE_H - 26) // 2, field_w, 26)
+        )
+        self._msg_field.setPlaceholderString_("Telegramへ送信…")
+        self._msg_field.setBezeled_(True)
+        self._msg_field.setDrawsBackground_(True)
+        self._msg_field.setTextColor_(NSColor.darkGrayColor())
+        self._msg_field.setFont_(NSFont.systemFontOfSize_(12))
+        self._msg_field.setFocusRingType_(1)
+        self._msg_field.setAction_("sendTelegramMessage:")
+        self._msg_field.setTarget_(self)
+
+        send_btn = NSButton.alloc().initWithFrame_(
+            CGRectMake(p + field_w + 6, (INPUT_BUBBLE_H - 26) // 2, send_w, 26)
+        )
+        send_btn.setTitle_("送信")
+        send_btn.setBezelStyle_(1)
+        send_btn.setAction_("sendTelegramMessage:")
+        send_btn.setTarget_(self)
+
+        bg.addSubview_(self._msg_field)
+        bg.addSubview_(send_btn)
+        self._bubble_window.contentView().addSubview_(bg)
 
     def _update_msg_panel_position(self):
         """UFO ウィンドウの直下にメッセージパネルを配置する。"""
@@ -552,16 +589,31 @@ class AppDelegate(NSObject):
         my = frame.origin.y - MSG_PANEL_H - 5
         self._msg_window.setFrameOrigin_(CGPointMake(mx, my))
 
+    def _update_input_bubble_position(self):
+        """UFO ウィンドウの直上に入力吹き出しを配置する。"""
+        if not self._msg_panel_visible:
+            return
+        frame = self._window.frame()
+        mx = frame.origin.x + (UFO_SIZE - INPUT_BUBBLE_W) / 2
+        my = frame.origin.y + UFO_SIZE + 10
+        self._bubble_window.setFrameOrigin_(CGPointMake(mx, my))
+
     def _show_msg_panel(self):
         self._hide_ocr_panel()
         self._hide_launcher_panel()
-        self._msg_panel_visible = True  # 先にセットしないと位置更新がスキップされる
+        self._msg_panel_visible = True
         self._update_msg_panel_position()
+        self._update_input_bubble_position()
         self._msg_window.orderFrontRegardless()
+        self._bubble_window.orderFrontRegardless()
+        NSApp.activateIgnoringOtherApps_(True)
+        self._bubble_window.makeKeyAndOrderFront_(None)
+        self._bubble_window.makeFirstResponder_(self._msg_field)
         self._msg_panel_item.setTitle_("✉️ メッセージ欄を非表示")
 
     def _hide_msg_panel(self):
         self._msg_window.orderOut_(None)
+        self._bubble_window.orderOut_(None)
         self._msg_panel_visible = False
         self._msg_panel_item.setTitle_("✉️ メッセージ欄")
 

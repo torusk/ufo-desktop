@@ -1010,25 +1010,22 @@ class AppDelegate(NSObject):
         menu.addItem_(NSMenuItem.separatorItem())
 
         # nanobot ゲートウェイ
-        self._nanobot_item = self._make_menu_item("nanobot 起動", "toggleNanobot:", "n", menu)
+        self._nanobot_item = self._make_menu_item("🐈 nanobot起動", "toggleNanobot:", "n", menu)
 
         # ログパネル
-        self._log_panel_item = self._make_menu_item("ログを表示", "toggleLogPanel:", "l", menu)
+        self._log_panel_item = self._make_menu_item("📝 ログ表示", "toggleLogPanel:", "l", menu)
 
         # メッセージパネル
-        self._msg_panel_item = self._make_menu_item("メッセージ欄を表示", "toggleMsgPanel:", "m", menu)
+        self._msg_panel_item = self._make_menu_item("✉️ メッセージ欄", "toggleMsgPanel:", "m", menu)
+
+        # チャットクリア
+        self._make_menu_item("🧹 チャットをクリア", "clearChat:", "", menu)
 
         # OCR 解析
         self._make_menu_item("🔍 OCR 解析", "startOCR:", "o", menu)
 
         # NFT 化
-        self._make_menu_item("🎖️ NFT化", "openNFTPages:", "n", menu)
-
-        # チャットクリア
-        self._make_menu_item("チャットをクリア", "clearChat:", "", menu)
-
-        # Telegram 設定確認
-        self._make_menu_item("Telegram設定を確認...", "showTelegramStatus:", "", menu)
+        self._make_menu_item("🎖️ NFT化", "openNFTPages:", "", menu)
 
         menu.addItem_(NSMenuItem.separatorItem())
 

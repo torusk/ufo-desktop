@@ -62,7 +62,7 @@ from Quartz import CGPointMake, CGRectMake
 import autostart
 import icons
 import telegram as tg
-from views import ClickableView, KeyableWindow, LogPanelView
+from views import ClickableView, KeyableWindow, LogPanelView, ResizeHandleView
 
 # ---------------------------------------------------------------------------
 # 定数
@@ -419,12 +419,10 @@ class AppDelegate(NSObject):
     def _show_log_panel(self):
         self._log_window.orderFrontRegardless()
         self._log_panel_visible = True
-        self._log_panel_item.setTitle_("📝 ログ非表示")
 
     def _hide_log_panel(self):
         self._log_window.orderOut_(None)
         self._log_panel_visible = False
-        self._log_panel_item.setTitle_("📝 ログ表示")
 
     @objc.typedSelector(b"v@:@")
     def toggleLogPanel_(self, sender):
@@ -555,9 +553,24 @@ class AppDelegate(NSObject):
         self._chat_font = NSFont.systemFontOfSize_(12)
 
         scroll.setDocumentView_(self._chat_text)
+
+        # リサイズハンドル（左下コーナー）
+        handle = ResizeHandleView.alloc().initWithFrame_(CGRectMake(0, 0, 24, 24))
+        handle.setWantsLayer_(True)
+        handle.layer().setBackgroundColor_(
+            NSColor.colorWithSRGBRed_green_blue_alpha_(0.5, 0.5, 0.55, 0.25).CGColor()
+        )
+        handle.layer().setCornerRadius_(4.0)
+
+        # サブビュー参照を保存（リサイズ時に再配置）
+        self._msg_bg       = bg
+        self._msg_scroll   = scroll
+        self._msg_send_btn = send_btn
+
         bg.addSubview_(scroll)
         bg.addSubview_(self._msg_field)
         bg.addSubview_(send_btn)
+        bg.addSubview_(handle)
         self._msg_window.contentView().addSubview_(bg)
 
     def _show_msg_panel(self):
@@ -565,12 +578,32 @@ class AppDelegate(NSObject):
         NSApp.activateIgnoringOtherApps_(True)
         self._msg_window.makeKeyAndOrderFront_(None)
         self._msg_window.makeFirstResponder_(self._msg_field)
-        self._msg_panel_item.setTitle_("✉️ メッセージ欄を非表示")
+        self._msg_panel_item.setTitle_("✉️ Telegram接続 非表示")
 
     def _hide_msg_panel(self):
         self._msg_window.orderOut_(None)
         self._msg_panel_visible = False
-        self._msg_panel_item.setTitle_("✉️ メッセージ欄")
+        self._msg_panel_item.setTitle_("✉️ Telegram接続")
+
+    def resize_msg_panel(self, new_w, new_h):
+        """リサイズハンドルからのコールバック。サブビューとフォントを更新する。"""
+        p = 8
+        send_w = 46
+        field_w = new_w - p * 2 - send_w - 6
+        chat_y = p + MSG_INPUT_H + 6
+        chat_w = new_w - p * 2
+        chat_h = max(60, new_h - chat_y - p)
+
+        self._msg_bg.setFrame_(CGRectMake(0, 0, new_w, new_h))
+        self._msg_scroll.setFrame_(CGRectMake(p, chat_y, chat_w, chat_h))
+        self._chat_text.setFrame_(CGRectMake(0, 0, chat_w, chat_h))
+        self._chat_text.setMinSize_((chat_w, chat_h))
+        self._msg_field.setFrame_(CGRectMake(p, p, field_w, MSG_INPUT_H))
+        self._msg_send_btn.setFrame_(CGRectMake(p + field_w + 6, p, send_w, MSG_INPUT_H))
+
+        font_size = max(10, min(22, round(12 * new_h / 320.0)))
+        self._chat_font = NSFont.systemFontOfSize_(font_size)
+        self._refresh_chat_view()
 
     @objc.typedSelector(b"v@:@")
     def toggleMsgPanel_(self, sender):
@@ -1303,11 +1336,8 @@ class AppDelegate(NSObject):
         # nanobot が getUpdates を使うため UFO 側のポーリングを停止
         self._tg_poller.stop()
 
-        # ログをクリアしてパネルを表示
-        self._log_lines.clear()
-        self._log_queue.clear()
-        self._refresh_log_view()
-        self._show_log_panel()
+        # チャットパネルを表示（nanobot の出力をチャットに流す）
+        self._show_msg_panel()
 
         # uv run nanobot gateway を起動（uv が見つからなければ venv 直接実行）
         try:
@@ -1354,12 +1384,12 @@ class AppDelegate(NSObject):
         self._tg_poller.start()
 
     def _read_nanobot_output(self, proc):
-        """nanobot の stdout をバックグラウンドで読み続けてキューに積む。"""
+        """nanobot の stdout をバックグラウンドで読み続けてチャットキューに積む。"""
         try:
             for raw in iter(proc.stdout.readline, b""):
                 line = raw.decode("utf-8", errors="replace").rstrip()
                 if line:
-                    self._log_queue.append(line)
+                    self._chat_queue.append(("recv", f"🤖 {line}"))
         except Exception:
             pass
 
@@ -1398,8 +1428,8 @@ class AppDelegate(NSObject):
         # nanobot ゲートウェイ
         self._nanobot_item = self._make_menu_item("🐈 nanobot起動", "toggleNanobot:", "n", menu)
 
-        # メッセージパネル
-        self._msg_panel_item = self._make_menu_item("✉️ メッセージ欄", "toggleMsgPanel:", "m", menu)
+        # Telegram チャット
+        self._msg_panel_item = self._make_menu_item("✉️ Telegram接続", "toggleMsgPanel:", "m", menu)
 
         # OCR 解析
         self._make_menu_item("🔍 OCR 解析", "startOCR:", "o", menu)
@@ -1415,9 +1445,6 @@ class AppDelegate(NSObject):
         )
         # 登録済みランチャー（動的）をここに挿入（menu を直接渡す）
         self._rebuild_launcher_menu(menu)
-
-        # ログパネル
-        self._log_panel_item = self._make_menu_item("📝 ログ表示", "toggleLogPanel:", "l", menu)
 
         # チャットクリア
         self._make_menu_item("🧹 チャットクリア", "clearChat:", "", menu)

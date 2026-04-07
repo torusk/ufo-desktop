@@ -21,7 +21,7 @@ from AppKit import (
     NSView,
     NSWindow,
 )
-from Quartz import CGPointMake
+from Quartz import CGPointMake, CGRectMake
 
 
 class KeyableWindow(NSWindow):
@@ -139,3 +139,36 @@ class ClickableView(NSView):
     def fireToggle_(self, timer):
         ClickableView._pending_timer = None
         NSApp.delegate().toggleAnimation()
+
+
+class ResizeHandleView(NSView):
+    """
+    メッセージパネル左下に配置するリサイズハンドル。
+    ドラッグで右上コーナーを固定したままウィンドウを拡縮する。
+    """
+
+    def acceptsFirstMouse_(self, event):
+        return True
+
+    def mouseDown_(self, event):
+        sl = NSEvent.mouseLocation()
+        self._sx = sl.x
+        self._sy = sl.y
+        f = self.window().frame()
+        self._wox = f.origin.x
+        self._woy = f.origin.y
+        self._ww  = f.size.width
+        self._wh  = f.size.height
+
+    def mouseDragged_(self, event):
+        sl = NSEvent.mouseLocation()
+        dx = sl.x - self._sx
+        dy = sl.y - self._sy
+        tr_x = self._wox + self._ww   # 右上を固定
+        tr_y = self._woy + self._wh
+        new_w = max(220, tr_x - (self._wox + dx))
+        new_h = max(200, tr_y - (self._woy + dy))
+        new_x = tr_x - new_w
+        new_y = tr_y - new_h
+        self.window().setFrame_display_(CGRectMake(new_x, new_y, new_w, new_h), True)
+        NSApp.delegate().resize_msg_panel(new_w, new_h)

@@ -854,8 +854,9 @@ class AppDelegate(NSObject):
         # 入力行（閉じるの上）
         input_y = LAUNCHER_PAD + 26 + 6
         add_w = 50
+        paste_w = 30
         label_w = 80
-        url_w = inner_w - label_w - add_w - 8
+        url_w = inner_w - label_w - paste_w - add_w - 12
 
         self._launcher_label_field = NSTextField.alloc().initWithFrame_(
             CGRectMake(LAUNCHER_PAD, input_y, label_w, 26)
@@ -865,16 +866,26 @@ class AppDelegate(NSObject):
         self._launcher_label_field.setDrawsBackground_(True)
         self._launcher_bg.addSubview_(self._launcher_label_field)
 
+        url_x = LAUNCHER_PAD + label_w + 4
         self._launcher_url_field = NSTextField.alloc().initWithFrame_(
-            CGRectMake(LAUNCHER_PAD + label_w + 4, input_y, url_w, 26)
+            CGRectMake(url_x, input_y, url_w, 26)
         )
-        self._launcher_url_field.setPlaceholderString_("https://...")
+        self._launcher_url_field.setPlaceholderString_("URLをコピーして📋")
         self._launcher_url_field.setBezeled_(True)
         self._launcher_url_field.setDrawsBackground_(True)
         self._launcher_bg.addSubview_(self._launcher_url_field)
 
+        paste_btn = NSButton.alloc().initWithFrame_(
+            CGRectMake(url_x + url_w + 4, input_y, paste_w, 26)
+        )
+        paste_btn.setTitle_("📋")
+        paste_btn.setBezelStyle_(1)
+        paste_btn.setAction_("pasteURL:")
+        paste_btn.setTarget_(self)
+        self._launcher_bg.addSubview_(paste_btn)
+
         add_btn = NSButton.alloc().initWithFrame_(
-            CGRectMake(LAUNCHER_PAD + label_w + 4 + url_w + 4, input_y, add_w, 26)
+            CGRectMake(url_x + url_w + 4 + paste_w + 4, input_y, add_w, 26)
         )
         add_btn.setTitle_("追加")
         add_btn.setBezelStyle_(1)
@@ -1001,6 +1012,14 @@ class AppDelegate(NSObject):
     @objc.typedSelector(b"v@:@")
     def closeLauncherPanel_(self, sender):
         self._hide_launcher_panel()
+
+    @objc.typedSelector(b"v@:@")
+    def pasteURL_(self, sender):
+        """クリップボードの内容を URL フィールドに貼り付ける。"""
+        pb = NSPasteboard.generalPasteboard()
+        text = pb.stringForType_("public.utf8-plain-text")
+        if text:
+            self._launcher_url_field.setStringValue_(text.strip())
 
     @objc.typedSelector(b"v@:@")
     def addLauncher_(self, sender):

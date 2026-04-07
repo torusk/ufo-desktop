@@ -651,7 +651,7 @@ class AppDelegate(NSObject):
         bg = NSView.alloc().initWithFrame_(CGRectMake(0, 0, OCR_PANEL_W, OCR_PANEL_H))
         bg.setWantsLayer_(True)
         bg.layer().setBackgroundColor_(
-            NSColor.colorWithSRGBRed_green_blue_alpha_(0.08, 0.08, 0.12, 0.92).CGColor()
+            NSColor.colorWithSRGBRed_green_blue_alpha_(0.96, 0.96, 0.97, 0.96).CGColor()
         )
         bg.layer().setCornerRadius_(12.0)
 
@@ -741,9 +741,9 @@ class AppDelegate(NSObject):
         self._ocr_window.setFrameOrigin_(CGPointMake(mx, my))
 
     def _refresh_ocr_view(self, text):
-        """OCR テキストビューをライトグレー等幅フォントで更新する。"""
+        """OCR テキストビューを更新する。"""
         font = NSFont.systemFontOfSize_(12)
-        color = NSColor.colorWithSRGBRed_green_blue_alpha_(0.9, 0.9, 0.9, 1.0)
+        color = NSColor.colorWithSRGBRed_green_blue_alpha_(0.1, 0.1, 0.15, 1.0)
         attrs = {NSFontAttributeName: font, NSForegroundColorAttributeName: color}
         self._ocr_text_view.textStorage().setAttributedString_(
             NSAttributedString.alloc().initWithString_attributes_(text, attrs)
@@ -835,7 +835,7 @@ class AppDelegate(NSObject):
         )
         self._launcher_bg.setWantsLayer_(True)
         self._launcher_bg.layer().setBackgroundColor_(
-            NSColor.colorWithSRGBRed_green_blue_alpha_(0.08, 0.08, 0.12, 0.92).CGColor()
+            NSColor.colorWithSRGBRed_green_blue_alpha_(0.96, 0.96, 0.97, 0.96).CGColor()
         )
         self._launcher_bg.layer().setCornerRadius_(12.0)
 
@@ -914,8 +914,8 @@ class AppDelegate(NSObject):
             del_btn = NSButton.alloc().initWithFrame_(
                 CGRectMake(inner_w - 26, row_y + 2, 22, 22)
             )
-            del_btn.setTitle_("×")
-            del_btn.setBezelStyle_(1)
+            del_btn.setTitle_("✕")
+            del_btn.setBezelStyle_(7)  # NSBezelStyleCircular
             del_btn.setTag_(i)
             del_btn.setAction_("deleteLauncherByTag:")
             del_btn.setTarget_(self)
@@ -929,7 +929,7 @@ class AppDelegate(NSObject):
             label_field.setBezeled_(False)
             label_field.setDrawsBackground_(False)
             label_field.setTextColor_(
-                NSColor.colorWithSRGBRed_green_blue_alpha_(0.9, 0.9, 0.9, 1.0)
+                NSColor.colorWithSRGBRed_green_blue_alpha_(0.1, 0.1, 0.15, 1.0)
             )
             label_field.setFont_(NSFont.systemFontOfSize_(12))
             content_view.addSubview_(label_field)
@@ -942,7 +942,7 @@ class AppDelegate(NSObject):
             url_field.setBezeled_(False)
             url_field.setDrawsBackground_(False)
             url_field.setTextColor_(
-                NSColor.colorWithSRGBRed_green_blue_alpha_(0.55, 0.65, 0.95, 1.0)
+                NSColor.colorWithSRGBRed_green_blue_alpha_(0.2, 0.3, 0.7, 1.0)
             )
             url_field.setFont_(NSFont.systemFontOfSize_(11))
             content_view.addSubview_(url_field)
@@ -972,7 +972,9 @@ class AppDelegate(NSObject):
         self._hide_ocr_panel()
         self._launcher_panel_visible = True
         self._update_launcher_panel_position()
-        self._launcher_window.orderFrontRegardless()
+        NSApp.activateIgnoringOtherApps_(True)
+        self._launcher_window.makeKeyAndOrderFront_(None)
+        self._launcher_window.makeFirstResponder_(self._launcher_label_field)
 
     def _hide_launcher_panel(self):
         if not hasattr(self, "_launcher_panel_visible"):

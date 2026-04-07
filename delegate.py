@@ -949,9 +949,10 @@ class AppDelegate(NSObject):
 
         self._launcher_scroll.setDocumentView_(content_view)
 
-    def _rebuild_launcher_menu(self):
+    def _rebuild_launcher_menu(self, menu=None):
         """メニューの動的ランチャーアイテムを再構築する。"""
-        menu = self._status_item.menu()
+        if menu is None:
+            menu = self._status_item.menu()
         for item in self._launcher_dynamic_items:
             menu.removeItem_(item)
         self._launcher_dynamic_items = []
@@ -1377,8 +1378,8 @@ class AppDelegate(NSObject):
         self._launcher_register_item = self._make_menu_item(
             "✏️ ショートカット登録", "showLauncherPanel:", "", menu
         )
-        # 登録済みランチャー（動的）をここに挿入
-        self._rebuild_launcher_menu()
+        # 登録済みランチャー（動的）をここに挿入（menu を直接渡す）
+        self._rebuild_launcher_menu(menu)
 
         # ログパネル
         self._log_panel_item = self._make_menu_item("📝 ログ表示", "toggleLogPanel:", "l", menu)

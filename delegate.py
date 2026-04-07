@@ -780,6 +780,14 @@ class AppDelegate(NSObject):
         subprocess.Popen(["open", "https://app.pinata.cloud/ipfs/files"])
         subprocess.Popen(["open", "https://sui-mint.torus-studio.tech/"])
 
+    @objc.typedSelector(b"v@:@")
+    def launchClaudeCode_(self, sender):
+        """Terminal を開いて UFO プロジェクトで claude を起動する。"""
+        import subprocess
+        project_dir = os.path.dirname(os.path.abspath(__file__))
+        script = f'tell application "Terminal" to do script "cd {project_dir} && claude"'
+        subprocess.Popen(["osascript", "-e", script])
+
     def _check_ollama_api(self):
         """Ollama API (localhost:11434) に接続できるか確認する。"""
         try:
@@ -1008,6 +1016,9 @@ class AppDelegate(NSObject):
         # UFO 表示/非表示
         self._hide_item = self._make_menu_item("UFO を隠す", "toggleHide:", "u", menu)
         menu.addItem_(NSMenuItem.separatorItem())
+
+        # Claude Code 起動
+        self._make_menu_item("⚡️ claude code起動", "launchClaudeCode:", "c", menu)
 
         # nanobot ゲートウェイ
         self._nanobot_item = self._make_menu_item("🐈 nanobot起動", "toggleNanobot:", "n", menu)

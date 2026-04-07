@@ -773,6 +773,13 @@ class AppDelegate(NSObject):
             daemon=True,
         ).start()
 
+    @objc.typedSelector(b"v@:@")
+    def openNFTPages_(self, sender):
+        """Pinata ストレージと mint サイトをブラウザで開く。"""
+        import subprocess
+        subprocess.Popen(["open", "https://app.pinata.cloud/ipfs/files"])
+        subprocess.Popen(["open", "https://sui-mint.torus-studio.tech/"])
+
     def _check_ollama_api(self):
         """Ollama API (localhost:11434) に接続できるか確認する。"""
         try:
@@ -1013,6 +1020,9 @@ class AppDelegate(NSObject):
 
         # OCR 解析
         self._make_menu_item("🔍 OCR 解析", "startOCR:", "o", menu)
+
+        # NFT 化
+        self._make_menu_item("🎖️ NFT化", "openNFTPages:", "n", menu)
 
         # チャットクリア
         self._make_menu_item("チャットをクリア", "clearChat:", "", menu)

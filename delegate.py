@@ -1211,6 +1211,18 @@ class AppDelegate(NSObject):
         subprocess.Popen(["open", "https://sui-mint.torus-studio.tech/"])
 
     @objc.typedSelector(b"v@:@")
+    def openStockPages_(self, sender):
+        """株情報サイトをブラウザで開く。"""
+        for url in [
+            "https://sekai-kabuka.com/pc-index.html",
+            "https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx1YlY4U0FtcGhHZ0pLVUNnQVAB?hl=ja&gl=JP&ceid=JP%3Aja",
+            "https://shikiho.toyokeizai.net/ranking",
+            "https://www.kabudragon.com/",
+            "https://kabutan.jp/",
+        ]:
+            subprocess.Popen(["open", url])
+
+    @objc.typedSelector(b"v@:@")
     def launchClaudeCode_(self, sender):
         """Terminal を開いて UFO プロジェクトで claude を起動する。"""
         project_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1611,6 +1623,9 @@ class AppDelegate(NSObject):
 
         # NFT 作成
         self._make_menu_item("🎖️ NFT作成", "openNFTPages:", "", menu)
+
+        # 株情報まとめ
+        self._make_menu_item("🫜 株情報まとめ", "openStockPages:", "", menu)
 
         menu.addItem_(NSMenuItem.separatorItem())
 

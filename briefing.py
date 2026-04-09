@@ -162,19 +162,19 @@ def build_report(
 
     lines = [f"# 🤖 AI Brief — {today}", ""]
 
-    lines += ["## 🔥 Hacker News", ""]
+    lines += ["## [🔥 Hacker News](https://news.ycombinator.com)", ""]
     lines += [f"- {t}" for t in hn] if hn else ["- (取得失敗)"]
     lines.append("")
 
-    lines += ["## 🤗 HuggingFace トレンド（週間）", ""]
+    lines += ["## [🤗 HuggingFace トレンド（週間）](https://huggingface.co/models?sort=trending)", ""]
     lines += [f"- {m}" for m in hf] if hf else ["- (取得失敗)"]
     lines.append("")
 
-    lines += ["## 🔀 OpenRouter 新着モデル", ""]
+    lines += ["## [🔀 OpenRouter 新着モデル](https://openrouter.ai/models)", ""]
     lines += [f"- {m}" for m in or_] if or_ else ["- (取得失敗)"]
     lines.append("")
 
-    lines += ["## 📄 Arxiv 最新論文（AI/ML）", ""]
+    lines += ["## [📄 Arxiv 最新論文（AI/ML）](https://arxiv.org/list/cs.AI/recent)", ""]
     lines += [f"- {t}" for t in arxiv] if arxiv else ["- (取得失敗)"]
     lines.append("")
 

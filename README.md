@@ -1,7 +1,7 @@
 # UFO Desktop
 
 macOSデスクトップ上にUFOキャラクターをふわふわ浮遊表示するアプリ。
-画面上を自律的に飛び回りながら、Telegram チャット・OCR解析・翻訳・ショートカット起動・nanobotゲートウェイ連携・デスクトップAIチャットなどの機能を持つ。
+画面上を自律的に飛び回りながら、Telegram チャット・OCR解析・翻訳・ショートカット起動・nanobotゲートウェイ連携・デスクトップAIチャット・AIトレンドブリーフィングなどの機能を持つ。
 
 ## セットアップ
 
@@ -30,6 +30,41 @@ uv run python ufo_app.py
 | パイプ表示 | Telegramメッセージ受信中 |
 
 ## 主な機能
+
+### 🛸 UFOと会話（デスクトップAIチャット）
+- 右クリック「🛸 UFOと会話」でチャットパネルが青みがかった背景で開く
+- デスクトップのテキスト入力から直接 nanobot AI に依頼（Telegram不要）
+- `nanobot agent -m` をワンショット実行し、レスポンスを 🛸 プレフィックスで表示
+- セッション `desktop:ufo` として会話履歴が保持される
+- nanobot ゲートウェイ（Telegram）と独立して同時使用可能
+- Brave Search API を設定すると Web検索・リアルタイム情報取得が可能
+
+```json
+// ~/.nanobot/config.json に追加
+{
+  "tools": {
+    "web": {
+      "search": { "apiKey": "YOUR_BRAVE_API_KEY" }
+    }
+  }
+}
+```
+
+### 🤖 AI情報まとめ（デイリーブリーフィング）
+- 右クリック「🤖 AI情報まとめ」でワンクリック実行、数秒で完了
+- **LLM不使用**・標準ライブラリのみ・依存ゼロ（`briefing.py`）
+- 以下4ソースを自動巡回してmarkdownレポートを生成：
+
+| ソース | 内容 |
+|--------|------|
+| 🔥 Hacker News RSS | テック/AIのホット記事 |
+| 🤗 HuggingFace API | 週間いいね数トレンドモデル |
+| 🔀 OpenRouter API | 新着モデル一覧 |
+| 📄 Arxiv (cs.AI+cs.LG) | 最新AI/ML論文 |
+
+- HNタイトルは `translategemma:4b`（Ollama）で自動日本語翻訳
+- Ollama未起動時は翻訳をスキップして英語のまま出力
+- 生成結果は `briefings/YYYY-MM-DD.md` に保存
 
 ### ✉️ Telegram接続（チャットパネル）
 - 画面右上に固定表示（ドラッグで任意の場所に移動可能）
@@ -66,25 +101,6 @@ uv run python ufo_app.py
 - × ボタンで削除
 - 登録データは `~/.ufo_config.json` の `launchers` キーに保存
 
-### 🛸 UFOと会話（デスクトップAIチャット）
-- 右クリック「🛸 UFOと会話」でチャットパネルが青みがかった背景で開く
-- デスクトップのテキスト入力から直接 nanobot AI に依頼（Telegram不要）
-- `nanobot agent -m` をワンショット実行し、レスポンスを 🛸 プレフィックスで表示
-- セッション `desktop:ufo` として会話履歴が保持される
-- nanobot ゲートウェイ（Telegram）と独立して同時使用可能
-- Brave Search API を設定すると Web検索・リアルタイム情報取得が可能
-
-```json
-// ~/.nanobot/config.json に追加
-{
-  "tools": {
-    "web": {
-      "search": { "apiKey": "YOUR_BRAVE_API_KEY" }
-    }
-  }
-}
-```
-
 ### 🐈 nanobotゲートウェイ連携
 - メニューバーから「🐈 nanobot起動/停止」で制御
 - 実行中はメニューバーアイコンがアニメーション表示
@@ -106,6 +122,7 @@ UFO を隠す                    (U)
 ────────────────────
 ⚡️ claude code起動            (C)
 🛸 UFOと会話
+🤖 AI情報まとめ
 🐈 nanobot起動 / 停止         (N)
 ✉️ Telegram接続               (M)
 🔍 OCR 解析                   (O)
@@ -113,10 +130,11 @@ UFO を隠す                    (U)
 ────────────────────
 ✏️ ショートカット登録
 🔗 登録したショートカット…
-────────────────────
 🧹 チャットクリア
 ────────────────────
 ログイン時に自動起動
+────────────────────
+🗑️ UFOを終了                  (Q)
 ```
 
 ## プロジェクト構成
@@ -125,6 +143,7 @@ UFO を隠す                    (U)
 ufo/
 ├── ufo_app.py          # エントリポイント
 ├── delegate.py         # AppDelegate（コアロジック・全機能統合）
+├── briefing.py         # AIデイリーブリーフィング（LLM不使用・標準ライブラリのみ）
 ├── views.py            # カスタムUIコンポーネント（UFO・リサイズハンドル等）
 ├── telegram.py         # Telegram Bot APIユーティリティ
 ├── autostart.py        # Launch Agent管理
@@ -132,6 +151,7 @@ ufo/
 ├── assets/
 │   ├── UFO.png         # UFO画像（透過PNG）
 │   └── mb_*.png        # メニューバーアイコン（自動生成）
+├── briefings/          # AIデイリーブリーフィング保存先（YYYY-MM-DD.md）
 ├── ufocapture/         # スクリーンショット・OCR対象画像の保存先
 └── pyproject.toml      # uvプロジェクト設定・依存関係
 ```
@@ -144,11 +164,15 @@ pyobjc-framework-Quartz  # グラフィックス
 Pillow                   # アイコン画像生成
 ```
 
+Ollama モデル（別途インストール）:
+- `glm-ocr` — OCR文字起こし
+- `translategemma:4b` — 翻訳・ブリーフィング日本語化
+
 ## 動作環境
 
 - macOS 12 (Monterey) 以降（Apple Silicon / Intel 両対応）
 - Python 3.9 以降（`uv` で管理）
-- [Ollama](https://ollama.com/) — OCR・翻訳機能に必要（`glm-ocr`・`translategemma:4b` モデル）
+- [Ollama](https://ollama.com/) — OCR・翻訳機能に必要
 
 ## 開発ロードマップ
 
@@ -156,5 +180,6 @@ Pillow                   # アイコン画像生成
 |----------|------|------|
 | Phase 1 | UFO浮遊表示・サイン波アニメーション | ✅ 完了 |
 | Phase 2 | インタラクティブ操作・Telegram・OCR・翻訳・nanobot・ショートカット登録 | ✅ 完了 |
+| Phase 2.5 | デスクトップAIチャット・AIデイリーブリーフィング（HN/HF/OR/Arxiv） | ✅ 完了 |
 | Phase 3 | Claude API連携（フォルダD&D画像分類・重複検出） | 📋 計画中 |
-| Phase 4 | nanobot cron連携（毎朝ニュース・株価・AIモデルランキング自動収集） | 📋 計画中 |
+| Phase 4 | launchd連携（ブリーフィング自動実行・スリープ対応） | 📋 計画中 |

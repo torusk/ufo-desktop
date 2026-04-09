@@ -1613,6 +1613,11 @@ class AppDelegate(NSObject):
         )
         self._autostart_item.setState_(1 if autostart.is_enabled() else 0)
 
+        menu.addItem_(NSMenuItem.separatorItem())
+
+        # 終了
+        self._make_menu_item("🗑️ UFOを終了", "quitApp:", "q", menu)
+
         self._status_item.setMenu_(menu)
 
     def _make_menu_item(self, title, action, key, menu):

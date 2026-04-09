@@ -18,6 +18,7 @@ from xml.etree import ElementTree
 HN_RSS_URL  = "https://hnrss.org/frontpage"
 HF_API_URL  = "https://huggingface.co/api/models?sort=likes7d&direction=-1&limit=10"
 OR_API_URL  = "https://openrouter.ai/api/v1/models"
+ARXIV_URL   = "https://export.arxiv.org/api/query?search_query=cat:cs.AI+OR+cat:cs.LG&sortBy=submittedDate&sortOrder=descending&max_results=8"
 OLLAMA_URL  = "http://localhost:11434/api/generate"
 TRANSLATE_MODEL = "translategemma:4b"
 
@@ -60,6 +61,19 @@ def fetch_hf() -> list[str]:
         if name:
             results.append(f"{name}  ({task})" if task else name)
     return results[:8]
+
+
+def fetch_arxiv() -> list[str]:
+    """Arxiv の最新AI/ML論文タイトルを取得する（cs.AI + cs.LG）。"""
+    data = _fetch(ARXIV_URL)
+    root = ElementTree.fromstring(data)
+    ns = "{http://www.w3.org/2005/Atom}"
+    titles = []
+    for entry in root.findall(f"{ns}entry"):
+        title = (entry.findtext(f"{ns}title") or "").strip().replace("\n", " ")
+        if title:
+            titles.append(title)
+    return titles[:6]
 
 
 def fetch_openrouter() -> list[str]:
@@ -138,6 +152,7 @@ def build_report(
     hn: list[str],
     hf: list[str],
     or_: list[str],
+    arxiv: list[str],
     errors: list[str],
     translated: bool,
 ) -> str:
@@ -157,6 +172,10 @@ def build_report(
 
     lines += ["## 🔀 OpenRouter 新着モデル", ""]
     lines += [f"- {m}" for m in or_] if or_ else ["- (取得失敗)"]
+    lines.append("")
+
+    lines += ["## 📄 Arxiv 最新論文（AI/ML）", ""]
+    lines += [f"- {t}" for t in arxiv] if arxiv else ["- (取得失敗)"]
     lines.append("")
 
     if errors:
@@ -193,6 +212,12 @@ def main() -> int:
         or_ = []
         errors.append(f"OR: {e}")
 
+    try:
+        arxiv = fetch_arxiv()
+    except Exception as e:
+        arxiv = []
+        errors.append(f"Arxiv: {e}")
+
     # --- HN タイトルを日本語翻訳 ---
     translated = False
     if hn:
@@ -202,7 +227,7 @@ def main() -> int:
             translated = True
 
     # --- レポート生成 ---
-    report = build_report(hn, hf, or_, errors, translated)
+    report = build_report(hn, hf, or_, arxiv, errors, translated)
 
     # --- 保存 ---
     BRIEFINGS_DIR.mkdir(exist_ok=True)

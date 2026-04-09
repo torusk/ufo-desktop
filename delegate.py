@@ -1395,7 +1395,7 @@ class AppDelegate(NSObject):
                 ["python3", script],
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=120,  # 翻訳（translategemma:4b）込みで余裕を持たせる
             )
             output = result.stdout.strip()
             if output:

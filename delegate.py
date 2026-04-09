@@ -125,6 +125,7 @@ class AppDelegate(NSObject):
 
         # --- 状態変数の初期化 ---
         self._nanobot_proc = None
+        self._ufo_chat_active = False  # デスクトップから nanobot agent に直接送信するモード
 
         # ドット絵アイコンを生成・ロード
         icons.generate_all()
@@ -1298,13 +1299,22 @@ class AppDelegate(NSObject):
 
     @objc.typedSelector(b"v@:@")
     def sendTelegramMessage_(self, sender):
-        """入力フィールドのテキストを Telegram に送信する。"""
+        """入力フィールドのテキストを送信する。UFOチャットモード時は nanobot agent へ直接ルーティング。"""
         text = self._msg_field.stringValue().strip()
         if not text:
             return
+
+        self._msg_field.setStringValue_("")
+        self._chat_queue.append(("sent", text))  # チャット欄に即時表示
+
+        # UFOと会話モード: nanobot agent -m に直接送信
+        if self._ufo_chat_active:
+            threading.Thread(target=self._call_nanobot_agent, args=(text,), daemon=True).start()
+            return
+
+        # 通常モード: Telegram 送信
         config = tg.load_config()
         if not config:
-            # 設定が見つからない場合はチャットにシステムメッセージを表示
             self._chat_queue.append((
                 "sys",
                 "⚠️ Telegram 未設定 — ~/.ufo_config.json を確認してください",
@@ -1321,9 +1331,6 @@ class AppDelegate(NSObject):
             self._show_msg_panel()
             return
 
-        self._msg_field.setStringValue_("")
-        self._chat_queue.append(("sent", text))  # チャット欄に即時表示
-
         def _send():
             try:
                 tg.send_message(token, chat_id, text)
@@ -1331,6 +1338,57 @@ class AppDelegate(NSObject):
                 self._chat_queue.append(("sys", f"⚠️ 送信エラー: {e}"))
 
         threading.Thread(target=_send, daemon=True).start()
+
+    def _call_nanobot_agent(self, text):
+        """nanobot agent -m でワンショット実行し、レスポンスをチャットに流す。"""
+        self._chat_queue.append(("sys", "🛸 考え中…"))
+        try:
+            env = os.environ.copy()
+            env["NO_COLOR"] = "1"   # Rich のカラーコードを無効化
+            env["TERM"] = "dumb"
+            result = subprocess.run(
+                ["uv", "run", "nanobot", "agent", "-m", text, "-s", "desktop:ufo"],
+                cwd=NANOBOT_DIR,
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=180,
+            )
+            output = result.stdout.strip()
+            # ロゴプレフィックス "🐈 " を除去（複数行の場合も考慮）
+            lines = output.splitlines()
+            cleaned = []
+            for line in lines:
+                stripped = line.strip()
+                if stripped.startswith("🐈"):
+                    stripped = stripped[1:].lstrip()
+                if stripped:
+                    cleaned.append(stripped)
+            response = "\n".join(cleaned)
+            if response:
+                self._chat_queue.append(("recv", f"🛸 {response}"))
+            else:
+                err = result.stderr.strip()
+                msg = err[:300] if err else "（空のレスポンス）"
+                self._chat_queue.append(("sys", f"⚠️ {msg}"))
+        except subprocess.TimeoutExpired:
+            self._chat_queue.append(("sys", "⚠️ タイムアウト（180秒）— Ollama が重い可能性があります"))
+        except Exception as e:
+            self._chat_queue.append(("sys", f"⚠️ エラー: {e}"))
+
+    @objc.typedSelector(b"v@:@")
+    def toggleUFOChat_(self, sender):
+        """デスクトップから nanobot AI に直接チャットするモードを切り替える。"""
+        if self._ufo_chat_active:
+            self._ufo_chat_active = False
+            self._ufo_chat_item.setTitle_("🛸 UFOと会話")
+            self._chat_queue.append(("sys", "🛸 UFOチャット終了"))
+        else:
+            self._ufo_chat_active = True
+            self._ufo_chat_item.setTitle_("🛸 UFO会話中 (停止)")
+            self._show_msg_panel()
+            self._chat_queue.append(("sys", "🛸 UFOチャット開始 — なんでも聞いてください"))
+        self._update_chat_mode()
 
     # -----------------------------------------------------------------------
     # nanobot ゲートウェイ制御
@@ -1429,7 +1487,10 @@ class AppDelegate(NSObject):
         """
         if not hasattr(self, "_msg_bg"):
             return  # _setup_message_panel 完了前に呼ばれることがあるためガード
-        if self._is_nanobot_running():
+        if self._ufo_chat_active:
+            color = NSColor.colorWithSRGBRed_green_blue_alpha_(0.88, 0.93, 1.0, 0.97).CGColor()
+            self._msg_field.setPlaceholderString_("🛸 UFOと会話中 — 何でも依頼してください (Enter)")
+        elif self._is_nanobot_running():
             color = NSColor.colorWithSRGBRed_green_blue_alpha_(0.92, 0.97, 0.93, 0.97).CGColor()
             self._msg_field.setPlaceholderString_("🤖 nanobot起動中 — AI が返答します")
         else:
@@ -1481,6 +1542,9 @@ class AppDelegate(NSObject):
 
         # Claude Code 起動
         self._make_menu_item("⚡️ claude code起動", "launchClaudeCode:", "c", menu)
+
+        # デスクトップから nanobot AI に直接チャット
+        self._ufo_chat_item = self._make_menu_item("🛸 UFOと会話", "toggleUFOChat:", "", menu)
 
         # nanobot ゲートウェイ
         self._nanobot_item = self._make_menu_item("🐈 nanobot起動", "toggleNanobot:", "n", menu)

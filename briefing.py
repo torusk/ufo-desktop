@@ -218,12 +218,17 @@ def main() -> int:
         arxiv = []
         errors.append(f"Arxiv: {e}")
 
-    # --- HN タイトルを日本語翻訳 ---
+    # --- HN・Arxiv タイトルを日本語翻訳 ---
     translated = False
     if hn:
         hn_ja = translate_items(hn)
         if hn_ja is not hn:   # 翻訳成功（新リストが返ってきた）
             hn = hn_ja
+            translated = True
+    if arxiv:
+        arxiv_ja = translate_items(arxiv)
+        if arxiv_ja is not arxiv:
+            arxiv = arxiv_ja
             translated = True
 
     # --- レポート生成 ---

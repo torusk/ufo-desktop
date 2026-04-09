@@ -57,14 +57,20 @@ uv run python ufo_app.py
 
 | ソース | 内容 |
 |--------|------|
-| 🔥 Hacker News RSS | テック/AIのホット記事 |
-| 🤗 HuggingFace API | 週間いいね数トレンドモデル |
-| 🔀 OpenRouter API | 新着モデル一覧 |
-| 📄 Arxiv (cs.AI+cs.LG) | 最新AI/ML論文 |
+| [🔥 Hacker News](https://news.ycombinator.com) | テック/AIのホット記事 |
+| [🤗 HuggingFace](https://huggingface.co/models?sort=trending) | 週間いいね数トレンドモデル |
+| [🔀 OpenRouter](https://openrouter.ai/models) | 新着モデル一覧 |
+| [📄 Arxiv cs.AI](https://arxiv.org/list/cs.AI/recent) | 最新AI/ML論文 |
 
-- HNタイトルは `translategemma:4b`（Ollama）で自動日本語翻訳
+- HN・Arxivタイトルは `translategemma:4b`（Ollama）で自動日本語翻訳
 - Ollama未起動時は翻訳をスキップして英語のまま出力
-- 生成結果は `briefings/YYYY-MM-DD.md` に保存
+- 生成結果は `briefings/YYYY-MM-DD.md` に保存、各見出しにソースリンク付き
+
+### ⏰ ブリーフィング自動化
+- 右クリック「⏰ ブリーフィング自動化」でlaunchd登録（チェックマークで状態表示）
+- **毎朝7:00**に `briefing.py` を自動実行
+- スリープ中に時刻を過ぎた場合は**次回起動時に自動実行**（cronと違いmissしない）
+- ログは `briefings/auto.log` に出力
 
 ### ✉️ Telegram接続（チャットパネル）
 - 画面右上に固定表示（ドラッグで任意の場所に移動可能）
@@ -106,6 +112,14 @@ uv run python ufo_app.py
 - 実行中はメニューバーアイコンがアニメーション表示
 - nanobot の出力は Telegram チャットパネルにリアルタイム表示（🤖 付き）
 
+### 🫜 株情報まとめ
+- 以下5サイトをワンクリックでまとめてブラウザに開く
+  - [世界の株価](https://sekai-kabuka.com/pc-index.html) — 主要指数・為替
+  - [Google ニュース（経済）](https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx1YlY4U0FtcGhHZ0pLVUNnQVAB?hl=ja&gl=JP&ceid=JP%3Aja)
+  - [会社四季報オンライン ランキング](https://shikiho.toyokeizai.net/ranking)
+  - [株ドラゴン](https://www.kabudragon.com/)
+  - [株探](https://kabutan.jp/)
+
 ### 🎖️ NFT作成
 - Pinata ストレージと mint サイトをブラウザで開く
 
@@ -123,10 +137,12 @@ UFO を隠す                    (U)
 ⚡️ claude code起動            (C)
 🛸 UFOと会話
 🤖 AI情報まとめ
+⏰ ブリーフィング自動化
 🐈 nanobot起動 / 停止         (N)
 ✉️ Telegram接続               (M)
 🔍 OCR 解析                   (O)
 🎖️ NFT作成
+🫜 株情報まとめ
 ────────────────────
 ✏️ ショートカット登録
 🔗 登録したショートカット…
@@ -180,6 +196,6 @@ Ollama モデル（別途インストール）:
 |----------|------|------|
 | Phase 1 | UFO浮遊表示・サイン波アニメーション | ✅ 完了 |
 | Phase 2 | インタラクティブ操作・Telegram・OCR・翻訳・nanobot・ショートカット登録 | ✅ 完了 |
-| Phase 2.5 | デスクトップAIチャット・AIデイリーブリーフィング（HN/HF/OR/Arxiv） | ✅ 完了 |
+| Phase 2.5 | デスクトップAIチャット・AIブリーフィング自動化・株情報まとめ | ✅ 完了 |
 | Phase 3 | Claude API連携（フォルダD&D画像分類・重複検出） | 📋 計画中 |
 | Phase 4 | launchd連携（ブリーフィング自動実行・スリープ対応） | 📋 計画中 |

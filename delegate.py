@@ -1382,16 +1382,31 @@ class AppDelegate(NSObject):
 
     @objc.typedSelector(b"v@:@")
     def generateAIBriefing_(self, sender):
-        """AI情報まとめを生成してチャットパネルに表示する。"""
+        """AI情報まとめを Python スクリプトで生成してチャットパネルに表示する。"""
         self._show_msg_panel()
         self._chat_queue.append(("sys", "🤖 AI情報を収集中…"))
-        prompt = "/no_think daily-briefingスキルを実行してください。"
-        threading.Thread(
-            target=self._run_nanobot_task,
-            args=(prompt,),
-            kwargs={"session_id": "desktop:briefing", "prefix": "🤖", "timeout": 300},
-            daemon=True,
-        ).start()
+        threading.Thread(target=self._run_briefing_script, daemon=True).start()
+
+    def _run_briefing_script(self):
+        """briefing.py を直接実行してレスポンスをチャットに流す。LLM不使用・高速。"""
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "briefing.py")
+        try:
+            result = subprocess.run(
+                ["python3", script],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            output = result.stdout.strip()
+            if output:
+                self._chat_queue.append(("recv", f"🤖 {output}"))
+            else:
+                err = result.stderr.strip()
+                self._chat_queue.append(("sys", f"⚠️ {err[:200] if err else '出力なし'}"))
+        except subprocess.TimeoutExpired:
+            self._chat_queue.append(("sys", "⚠️ タイムアウト（30秒）— ネットワークを確認してください"))
+        except Exception as e:
+            self._chat_queue.append(("sys", f"⚠️ エラー: {e}"))
 
     @objc.typedSelector(b"v@:@")
     def toggleUFOChat_(self, sender):

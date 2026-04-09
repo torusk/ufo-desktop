@@ -1384,12 +1384,8 @@ class AppDelegate(NSObject):
     def generateAIBriefing_(self, sender):
         """AI情報まとめを生成してチャットパネルに表示する。"""
         self._show_msg_panel()
-        self._chat_queue.append(("sys", "🤖 AI情報を収集中… (数分かかります)"))
-        prompt = (
-            "daily-briefingスキルを使ってAIトレンドレポートを作成してください。"
-            "HackerNews・HuggingFace・LocalLLaMA・OpenRouterの情報をWebFetchで収集し、"
-            "日本語でまとめてmemoryに保存してください。"
-        )
+        self._chat_queue.append(("sys", "🤖 AI情報を収集中…"))
+        prompt = "/no_think daily-briefingスキルを実行してください。"
         threading.Thread(
             target=self._run_nanobot_task,
             args=(prompt,),

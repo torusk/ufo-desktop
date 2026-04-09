@@ -1206,9 +1206,24 @@ class AppDelegate(NSObject):
 
     @objc.typedSelector(b"v@:@")
     def openNFTPages_(self, sender):
-        """Pinata ストレージと mint サイトをブラウザで開く。"""
-        subprocess.Popen(["open", "https://app.pinata.cloud/ipfs/files"])
-        subprocess.Popen(["open", "https://sui-mint.torus-studio.tech/"])
+        """Pinata ストレージと mint サイトを Chrome で左右2分割して開く。"""
+        screen_script = 'tell application "Finder" to get bounds of window of desktop'
+        result = subprocess.run(["osascript", "-e", screen_script], capture_output=True, text=True)
+        try:
+            parts = [int(x.strip()) for x in result.stdout.strip().split(",")]
+            sw, sh = parts[2], parts[3]
+        except Exception:
+            sw, sh = 1920, 1080
+        hw = sw // 2
+        script = "\n".join([
+            'tell application "Google Chrome" to activate',
+            f'tell application "Google Chrome" to open location "https://sui-mint.torus-studio.tech/"',
+            f'tell application "Google Chrome" to set bounds of front window to {{0, 0, {hw}, {sh}}}',
+            'tell application "Google Chrome" to make new window',
+            f'tell application "Google Chrome" to set URL of active tab of front window to "https://app.pinata.cloud/ipfs/files"',
+            f'tell application "Google Chrome" to set bounds of front window to {{{hw}, 0, {sw}, {sh}}}',
+        ])
+        subprocess.Popen(["osascript", "-e", script])
 
     @objc.typedSelector(b"v@:@")
     def openStockPages_(self, sender):

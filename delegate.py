@@ -1548,6 +1548,19 @@ class AppDelegate(NSObject):
     # -----------------------------------------------------------------------
 
     @objc.typedSelector(b"v@:@")
+    def toggleBriefingAutostart_(self, sender):
+        """ブリーフィング自動実行（毎朝7時）のオン/オフを切り替える。"""
+        if autostart.briefing_is_enabled():
+            autostart.briefing_disable()
+            self._briefing_auto_item.setState_(0)
+            self._chat_queue.append(("sys", "⏰ ブリーフィング自動化 OFF"))
+        else:
+            autostart.briefing_enable(hour=7, minute=0)
+            self._briefing_auto_item.setState_(1)
+            self._chat_queue.append(("sys", "⏰ ブリーフィング自動化 ON — 毎朝7:00に実行します"))
+            self._show_msg_panel()
+
+    @objc.typedSelector(b"v@:@")
     def toggleAutostart_(self, sender):
         """ログイン時自動起動のオン/オフを切り替える。"""
         if autostart.is_enabled():
@@ -1578,8 +1591,14 @@ class AppDelegate(NSObject):
         # デスクトップから nanobot AI に直接チャット
         self._ufo_chat_item = self._make_menu_item("🛸 UFOと会話", "toggleUFOChat:", "", menu)
 
-        # AI情報まとめ（HN・HuggingFace・LocalLLaMA・OpenRouterを巡回してレポート生成）
+        # AI情報まとめ（HN・HuggingFace・Arxiv・OpenRouterを巡回してレポート生成）
         self._make_menu_item("🤖 AI情報まとめ", "generateAIBriefing:", "", menu)
+
+        # ブリーフィング自動実行（launchd / 毎朝7時）
+        self._briefing_auto_item = self._make_menu_item(
+            "⏰ ブリーフィング自動化", "toggleBriefingAutostart:", "", menu
+        )
+        self._briefing_auto_item.setState_(1 if autostart.briefing_is_enabled() else 0)
 
         # nanobot ゲートウェイ
         self._nanobot_item = self._make_menu_item("🐈 nanobot起動", "toggleNanobot:", "n", menu)

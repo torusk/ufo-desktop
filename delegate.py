@@ -1341,18 +1341,22 @@ class AppDelegate(NSObject):
 
     def _call_nanobot_agent(self, text):
         """nanobot agent -m でワンショット実行し、レスポンスをチャットに流す。"""
-        self._chat_queue.append(("sys", "🛸 考え中…"))
+        self._run_nanobot_task(text, session_id="desktop:ufo", prefix="🛸", timeout=180)
+
+    def _run_nanobot_task(self, text, *, session_id, prefix, timeout):
+        """nanobot agent -m を実行してレスポンスをチャットに流す共通処理。"""
+        self._chat_queue.append(("sys", f"{prefix} 考え中…"))
         try:
             env = os.environ.copy()
             env["NO_COLOR"] = "1"   # Rich のカラーコードを無効化
             env["TERM"] = "dumb"
             result = subprocess.run(
-                ["uv", "run", "nanobot", "agent", "-m", text, "-s", "desktop:ufo"],
+                ["uv", "run", "nanobot", "agent", "-m", text, "-s", session_id],
                 cwd=NANOBOT_DIR,
                 capture_output=True,
                 text=True,
                 env=env,
-                timeout=180,
+                timeout=timeout,
             )
             output = result.stdout.strip()
             # ロゴプレフィックス "🐈 " を除去（複数行の場合も考慮）
@@ -1366,15 +1370,32 @@ class AppDelegate(NSObject):
                     cleaned.append(stripped)
             response = "\n".join(cleaned)
             if response:
-                self._chat_queue.append(("recv", f"🛸 {response}"))
+                self._chat_queue.append(("recv", f"{prefix} {response}"))
             else:
                 err = result.stderr.strip()
                 msg = err[:300] if err else "（空のレスポンス）"
                 self._chat_queue.append(("sys", f"⚠️ {msg}"))
         except subprocess.TimeoutExpired:
-            self._chat_queue.append(("sys", "⚠️ タイムアウト（180秒）— Ollama が重い可能性があります"))
+            self._chat_queue.append(("sys", f"⚠️ タイムアウト（{timeout}秒）— Ollama が重い可能性があります"))
         except Exception as e:
             self._chat_queue.append(("sys", f"⚠️ エラー: {e}"))
+
+    @objc.typedSelector(b"v@:@")
+    def generateAIBriefing_(self, sender):
+        """AI情報まとめを生成してチャットパネルに表示する。"""
+        self._show_msg_panel()
+        self._chat_queue.append(("sys", "🤖 AI情報を収集中… (数分かかります)"))
+        prompt = (
+            "daily-briefingスキルを使ってAIトレンドレポートを作成してください。"
+            "HackerNews・HuggingFace・LocalLLaMA・OpenRouterの情報をWebFetchで収集し、"
+            "日本語でまとめてmemoryに保存してください。"
+        )
+        threading.Thread(
+            target=self._run_nanobot_task,
+            args=(prompt,),
+            kwargs={"session_id": "desktop:briefing", "prefix": "🤖", "timeout": 300},
+            daemon=True,
+        ).start()
 
     @objc.typedSelector(b"v@:@")
     def toggleUFOChat_(self, sender):
@@ -1545,6 +1566,9 @@ class AppDelegate(NSObject):
 
         # デスクトップから nanobot AI に直接チャット
         self._ufo_chat_item = self._make_menu_item("🛸 UFOと会話", "toggleUFOChat:", "", menu)
+
+        # AI情報まとめ（HN・HuggingFace・LocalLLaMA・OpenRouterを巡回してレポート生成）
+        self._make_menu_item("🤖 AI情報まとめ", "generateAIBriefing:", "", menu)
 
         # nanobot ゲートウェイ
         self._nanobot_item = self._make_menu_item("🐈 nanobot起動", "toggleNanobot:", "n", menu)

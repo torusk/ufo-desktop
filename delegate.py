@@ -1212,15 +1212,40 @@ class AppDelegate(NSObject):
 
     @objc.typedSelector(b"v@:@")
     def openStockPages_(self, sender):
-        """株情報サイトをブラウザで開く。"""
-        for url in [
+        """株情報サイトを Chrome で開き、画面を4分割して均等配置する。"""
+        urls = [
             "https://sekai-kabuka.com/pc-index.html",
             "https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx1YlY4U0FtcGhHZ0pLVUNnQVAB?hl=ja&gl=JP&ceid=JP%3Aja",
             "https://shikiho.toyokeizai.net/ranking",
             "https://www.kabudragon.com/",
-            "https://kabutan.jp/",
-        ]:
-            subprocess.Popen(["open", url])
+        ]
+        # 画面サイズ取得
+        screen_script = 'tell application "Finder" to get bounds of window of desktop'
+        result = subprocess.run(["osascript", "-e", screen_script], capture_output=True, text=True)
+        try:
+            parts = [int(x.strip()) for x in result.stdout.strip().split(",")]
+            sw, sh = parts[2], parts[3]
+        except Exception:
+            sw, sh = 1920, 1080
+        hw, hh = sw // 2, sh // 2
+        # 各象限の bounds: {left, top, right, bottom}
+        quadrants = [
+            (0,   0,   hw,  hh),   # 左上
+            (hw,  0,   sw,  hh),   # 右上
+            (0,   hh,  hw,  sh),   # 左下
+            (hw,  hh,  sw,  sh),   # 右下
+        ]
+        as_parts = []
+        for i, (url, (l, t, r, b)) in enumerate(zip(urls, quadrants)):
+            if i == 0:
+                as_parts.append(f'tell application "Google Chrome" to activate')
+                as_parts.append(f'tell application "Google Chrome" to open location "{url}"')
+            else:
+                as_parts.append(f'tell application "Google Chrome" to make new window')
+                as_parts.append(f'tell application "Google Chrome" to set URL of active tab of front window to "{url}"')
+            as_parts.append(f'tell application "Google Chrome" to set bounds of front window to {{{l}, {t}, {r}, {b}}}')
+        script = "\n".join(as_parts)
+        subprocess.Popen(["osascript", "-e", script])
 
     @objc.typedSelector(b"v@:@")
     def launchClaudeCode_(self, sender):

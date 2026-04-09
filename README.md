@@ -22,12 +22,7 @@ uv run python ufo_app.py
 
 ### メニューバーアイコンの状態
 
-| アイコン | 状態 |
-|----------|------|
-| 🛸（通常） | UFO浮遊中 |
-| 🛸💤 | UFO停止中 |
-| バー点滅 | nanobot実行中 |
-| パイプ表示 | Telegramメッセージ受信中 |
+（検討中）
 
 ## 主な機能
 
@@ -113,12 +108,11 @@ uv run python ufo_app.py
 - nanobot の出力は Telegram チャットパネルにリアルタイム表示（🤖 付き）
 
 ### 🫜 株情報まとめ
-- 以下5サイトをワンクリックでまとめてブラウザに開く
-  - [世界の株価](https://sekai-kabuka.com/pc-index.html) — 主要指数・為替
-  - [Google ニュース（経済）](https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx1YlY4U0FtcGhHZ0pLVUNnQVAB?hl=ja&gl=JP&ceid=JP%3Aja)
-  - [会社四季報オンライン ランキング](https://shikiho.toyokeizai.net/ranking)
-  - [株ドラゴン](https://www.kabudragon.com/)
-  - [株探](https://kabutan.jp/)
+- 以下4サイトをワンクリックで Chrome に4分割表示（画面を均等に4象限に配置）
+  - 左上: [Google ニュース（経済）](https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx1YlY4U0FtcGhHZ0pLVUNnQVAB?hl=ja&gl=JP&ceid=JP%3Aja)
+  - 右上: [世界の株価](https://sekai-kabuka.com/pc-index.html) — 主要指数・為替
+  - 左下: [会社四季報オンライン ランキング](https://shikiho.toyokeizai.net/ranking)
+  - 右下: [株ドラゴン](https://www.kabudragon.com/)
 
 ### 🎖️ NFT作成
 - Pinata ストレージと mint サイトをブラウザで開く
@@ -190,12 +184,3 @@ Ollama モデル（別途インストール）:
 - Python 3.9 以降（`uv` で管理）
 - [Ollama](https://ollama.com/) — OCR・翻訳機能に必要
 
-## 開発ロードマップ
-
-| フェーズ | 内容 | 状態 |
-|----------|------|------|
-| Phase 1 | UFO浮遊表示・サイン波アニメーション | ✅ 完了 |
-| Phase 2 | インタラクティブ操作・Telegram・OCR・翻訳・nanobot・ショートカット登録 | ✅ 完了 |
-| Phase 2.5 | デスクトップAIチャット・AIブリーフィング自動化・株情報まとめ | ✅ 完了 |
-| Phase 3 | Claude API連携（フォルダD&D画像分類・重複検出） | 📋 計画中 |
-| Phase 4 | launchd連携（ブリーフィング自動実行・スリープ対応） | 📋 計画中 |

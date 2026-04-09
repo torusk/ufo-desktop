@@ -1214,8 +1214,8 @@ class AppDelegate(NSObject):
     def openStockPages_(self, sender):
         """株情報サイトを Chrome で開き、画面を4分割して均等配置する。"""
         urls = [
-            "https://sekai-kabuka.com/pc-index.html",
             "https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx1YlY4U0FtcGhHZ0pLVUNnQVAB?hl=ja&gl=JP&ceid=JP%3Aja",
+            "https://sekai-kabuka.com/pc-index.html",
             "https://shikiho.toyokeizai.net/ranking",
             "https://www.kabudragon.com/",
         ]

@@ -1,7 +1,7 @@
 # UFO Desktop
 
 macOSデスクトップ上にUFOキャラクターをふわふわ浮遊表示するアプリ。
-画面上を自律的に飛び回りながら、Telegram チャット・OCR解析・翻訳・ショートカット起動・nanobotゲートウェイ連携などの機能を持つ。
+画面上を自律的に飛び回りながら、Telegram チャット・OCR解析・翻訳・ショートカット起動・nanobotゲートウェイ連携・デスクトップAIチャットなどの機能を持つ。
 
 ## セットアップ
 
@@ -66,6 +66,25 @@ uv run python ufo_app.py
 - × ボタンで削除
 - 登録データは `~/.ufo_config.json` の `launchers` キーに保存
 
+### 🛸 UFOと会話（デスクトップAIチャット）
+- 右クリック「🛸 UFOと会話」でチャットパネルが青みがかった背景で開く
+- デスクトップのテキスト入力から直接 nanobot AI に依頼（Telegram不要）
+- `nanobot agent -m` をワンショット実行し、レスポンスを 🛸 プレフィックスで表示
+- セッション `desktop:ufo` として会話履歴が保持される
+- nanobot ゲートウェイ（Telegram）と独立して同時使用可能
+- Brave Search API を設定すると Web検索・リアルタイム情報取得が可能
+
+```json
+// ~/.nanobot/config.json に追加
+{
+  "tools": {
+    "web": {
+      "search": { "apiKey": "YOUR_BRAVE_API_KEY" }
+    }
+  }
+}
+```
+
 ### 🐈 nanobotゲートウェイ連携
 - メニューバーから「🐈 nanobot起動/停止」で制御
 - 実行中はメニューバーアイコンがアニメーション表示
@@ -86,6 +105,7 @@ uv run python ufo_app.py
 UFO を隠す                    (U)
 ────────────────────
 ⚡️ claude code起動            (C)
+🛸 UFOと会話
 🐈 nanobot起動 / 停止         (N)
 ✉️ Telegram接続               (M)
 🔍 OCR 解析                   (O)
@@ -137,3 +157,4 @@ Pillow                   # アイコン画像生成
 | Phase 1 | UFO浮遊表示・サイン波アニメーション | ✅ 完了 |
 | Phase 2 | インタラクティブ操作・Telegram・OCR・翻訳・nanobot・ショートカット登録 | ✅ 完了 |
 | Phase 3 | Claude API連携（フォルダD&D画像分類・重複検出） | 📋 計画中 |
+| Phase 4 | nanobot cron連携（毎朝ニュース・株価・AIモデルランキング自動収集） | 📋 計画中 |

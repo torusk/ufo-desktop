@@ -5,10 +5,16 @@ macOSデスクトップ上にUFOキャラクターをふわふわ浮遊表示す
 
 ## セットアップ
 
+プロジェクトは `~/ufo` シンボリックリンク経由でアクセスする（実体がどこにあっても同じコマンドで起動できる）。
+
 ```bash
-uv sync
-uv run python ufo_app.py
+cd ~/ufo
+uv sync                      # 初回 or 環境を作り直すとき
+uv run python ufo_app.py     # 手動起動
 ```
+
+ログイン時の自動起動はアプリ内メニューの「ログイン時に自動起動」から設定する。
+詳細は `docs/startup_guide.md` を参照。
 
 ## 操作方法
 

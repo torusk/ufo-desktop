@@ -1230,7 +1230,7 @@ class AppDelegate(NSObject):
         """株情報サイトを Chrome で開き、画面を4分割して均等配置する。"""
         urls = [
             "https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx1YlY4U0FtcGhHZ0pLVUNnQVAB?hl=ja&gl=JP&ceid=JP%3Aja",
-            "https://sekai-kabuka.com/pc-index.html",
+            "https://kabutan.jp/warning/trading_value_ranking",
             "https://shikiho.toyokeizai.net/ranking",
             "https://www.kabudragon.com/",
         ]

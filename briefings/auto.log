@@ -1,0 +1,144 @@
+# 🤖 AI Brief — 2026-04-10
+
+## [🔥 Hacker News](https://news.ycombinator.com)
+
+- How Microsoft Abuses Its Users
+- Moving from WordPress to Jekyll (and static site generators in general)
+- Netflix Prices Went Up Again – I Bought a DVD Player Instead
+- Charcuterie – Visual similarity Unicode explorer
+- Reverse engineering Gemini's SynthID detection
+- Native Instant Space Switching on macOS
+- Maine is about to become the first state to ban major new data centers
+- Bitmap fonts make computers feel like computers again
+
+## [🤗 HuggingFace トレンド（週間）](https://huggingface.co/models?sort=trending)
+
+- google/gemma-4-31B-it  (image-text-to-text)
+- dealignai/Gemma-4-31B-JANG_4M-CRACK  (text-generation)
+- zai-org/GLM-5.1  (text-generation)
+- netflix/void-model  (video-to-video)
+- openbmb/VoxCPM2  (text-to-speech)
+- google/gemma-4-26B-A4B-it  (image-text-to-text)
+- Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled  (image-text-to-text)
+- google/gemma-4-E4B-it  (any-to-any)
+
+## [🔀 OpenRouter 新着モデル](https://openrouter.ai/models)
+
+- anthropic/claude-opus-4.6-fast
+- z-ai/glm-5.1
+- google/gemma-4-26b-a4b-it
+- google/gemma-4-31b-it
+- qwen/qwen3.6-plus
+- z-ai/glm-5v-turbo
+- arcee-ai/trinity-large-thinking
+- x-ai/grok-4.20-multi-agent
+
+## [📄 Arxiv 最新論文（AI/ML）](https://arxiv.org/list/cs.AI/recent)
+
+- Fast Spatial Memory with Elastic Test-Time Training
+- Toward a Tractability Frontier for Exact Relevance Certification
+- MoRight: Motion Control Done Right
+- Measurement of Generative AI Workload Power Profiles for Whole-Facility Data Center Infrastructure Planning
+- Personalized RewardBench: Evaluating Reward Models with Human Aligned Personalization
+- RoSHI: A Versatile Robot-oriented Suit for Human Data In-the-Wild
+
+---
+生成: 2026-04-10 07:09  （翻訳スキップ — Ollama未起動？）
+
+✅ 保存: /Users/kazuki/Desktop/ufo/briefings/2026-04-10.md
+# 🤖 AI Brief — 2026-04-11
+
+## [🔥 Hacker News](https://news.ycombinator.com)
+
+- Combining spicy foods with mint boosts anti-inflammatory effects 100x or more
+- DOJ Top Antitrust Litigators Exit After Ticketmaster Accord
+- DOJ wants to scrap Watergate-era rule that makes presidential records public
+- Nowhere Is Safe
+- Chimpanzees in Uganda locked in eight-year 'civil war', say researchers
+- Watgo – A WebAssembly Toolkit for Go
+- Molotov cocktail is hurled at home of Sam Altman
+- Show HN: A WYSIWYG word processor in Python
+
+## [🤗 HuggingFace トレンド（週間）](https://huggingface.co/models?sort=trending)
+
+- google/gemma-4-31B-it  (image-text-to-text)
+- zai-org/GLM-5.1  (text-generation)
+- dealignai/Gemma-4-31B-JANG_4M-CRACK  (image-text-to-text)
+- openbmb/VoxCPM2  (text-to-speech)
+- netflix/void-model  (video-to-video)
+- Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled  (image-text-to-text)
+- k2-fsa/OmniVoice  (text-to-speech)
+- google/gemma-4-E4B-it  (any-to-any)
+
+## [🔀 OpenRouter 新着モデル](https://openrouter.ai/models)
+
+- anthropic/claude-opus-4.6-fast
+- z-ai/glm-5.1
+- google/gemma-4-26b-a4b-it
+- google/gemma-4-31b-it
+- qwen/qwen3.6-plus
+- z-ai/glm-5v-turbo
+- arcee-ai/trinity-large-thinking
+- x-ai/grok-4.20-multi-agent
+
+## [📄 Arxiv 最新論文（AI/ML）](https://arxiv.org/list/cs.AI/recent)
+
+- Act Wisely: Cultivating Meta-Cognitive Tool Use in Agentic Multimodal Models
+- SIM1: Physics-Aligned Simulator as Zero-Shot Data Scaler in Deformable Worlds
+- Seeing but Not Thinking: Routing Distraction in Multimodal Mixture-of-Experts
+- AVGen-Bench: A Task-Driven Benchmark for Multi-Granular Evaluation of Text-to-Audio-Video Generation
+- OpenVLThinkerV2: A Generalist Multimodal Reasoning Model for Multi-domain Visual Tasks
+- Meta-learning In-Context Enables Training-Free Cross Subject Brain Decoding
+
+---
+生成: 2026-04-11 07:04  （翻訳スキップ — Ollama未起動？）
+
+✅ 保存: /Users/kazuki/Desktop/ufo/briefings/2026-04-11.md
+# 🤖 AI Brief — 2026-04-12
+
+## [🔥 Hacker News](https://news.ycombinator.com)
+
+- Apple Silicon and Virtual Machines: Beating the 2 VM Limit (2023)
+- 447 TB/cm² at zero retention energy – atomic-scale memory on fluorographane
+- Dark Castle
+- How We Broke Top AI Agent Benchmarks: And What Comes Next
+- How to build a `Git diff` driver
+- The APL programming language source code (2012)
+- Small models also found the vulnerabilities that Mythos found
+- Phone Trips
+
+## [🤗 HuggingFace トレンド（週間）](https://huggingface.co/models?sort=trending)
+
+- zai-org/GLM-5.1  (text-generation)
+- dealignai/Gemma-4-31B-JANG_4M-CRACK  (image-text-to-text)
+- google/gemma-4-31B-it  (image-text-to-text)
+- openbmb/VoxCPM2  (text-to-speech)
+- netflix/void-model  (video-to-video)
+- k2-fsa/OmniVoice  (text-to-speech)
+- Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled  (image-text-to-text)
+- google/gemma-4-E4B-it  (any-to-any)
+
+## [🔀 OpenRouter 新着モデル](https://openrouter.ai/models)
+
+- anthropic/claude-opus-4.6-fast
+- z-ai/glm-5.1
+- google/gemma-4-26b-a4b-it
+- google/gemma-4-31b-it
+- qwen/qwen3.6-plus
+- z-ai/glm-5v-turbo
+- arcee-ai/trinity-large-thinking
+- x-ai/grok-4.20-multi-agent
+
+## [📄 Arxiv 最新論文（AI/ML）](https://arxiv.org/list/cs.AI/recent)
+
+- Act Wisely: Cultivating Meta-Cognitive Tool Use in Agentic Multimodal Models
+- SIM1: Physics-Aligned Simulator as Zero-Shot Data Scaler in Deformable Worlds
+- Seeing but Not Thinking: Routing Distraction in Multimodal Mixture-of-Experts
+- AVGen-Bench: A Task-Driven Benchmark for Multi-Granular Evaluation of Text-to-Audio-Video Generation
+- OpenVLThinkerV2: A Generalist Multimodal Reasoning Model for Multi-domain Visual Tasks
+- Meta-learning In-Context Enables Training-Free Cross Subject Brain Decoding
+
+---
+生成: 2026-04-12 07:08  （翻訳スキップ — Ollama未起動？）
+
+✅ 保存: /Users/kazuki/Desktop/ufo/briefings/2026-04-12.md
